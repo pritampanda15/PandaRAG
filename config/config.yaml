@@ -1,0 +1,78 @@
+# ADMET Prediction System Configuration
+
+data:
+  # TDC dataset name (options: Caco2_Wang, HIA_Hou, BBB_Martins, CYP2D6_Veith, hERG, AMES)
+  dataset_name: "Caco2_Wang"
+  task_type: "regression"  # regression or classification
+  test_split: 0.2
+  val_split: 0.1
+  random_seed: 42
+  
+  # Molecular featurization
+  atom_features:
+    - atomic_num
+    - chirality
+    - degree
+    - formal_charge
+    - num_hs
+    - num_radical_electrons
+    - hybridization
+    - is_aromatic
+    - is_in_ring
+  
+  bond_features:
+    - bond_type
+    - is_conjugated
+    - is_in_ring
+    - stereo
+
+model:
+  # GNN architecture
+  architecture: "GCN"  # GCN, GAT, or MPNN
+  hidden_dim: 128
+  num_layers: 3
+  dropout: 0.2
+  
+  # Pooling method
+  pooling: "mean"  # mean, sum, or max
+  
+  # Output head
+  output_dim: 1
+  
+  # Training
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  batch_size: 32
+  epochs: 100
+  early_stopping_patience: 15
+  
+  # Device
+  device: "cuda"  # cuda or cpu
+
+rag:
+  # Embedding model
+  embedding_model: "all-MiniLM-L6-v2"
+  
+  # Vector store
+  collection_name: "admet_knowledge"
+  persist_directory: "./chroma_db"
+  
+  # Retrieval
+  top_k: 5
+  similarity_threshold: 0.7
+  
+  # LLM
+  llm_model: "gpt-4o-mini"
+  temperature: 0.3
+  max_tokens: 500
+
+mlflow:
+  experiment_name: "admet_prediction"
+  tracking_uri: "./mlruns"
+
+paths:
+  raw_data: "./data/raw"
+  processed_data: "./data/processed"
+  knowledge_base: "./data/knowledge_base"
+  models: "./models"
+  logs: "./logs"
