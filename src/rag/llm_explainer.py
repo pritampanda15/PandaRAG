@@ -7,6 +7,8 @@ of molecular property predictions.
 
 import os
 from typing import Dict, Optional, Tuple
+import httpx
+import certifi
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -104,8 +106,14 @@ class ADMETExplainer:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set")
-        
-        self.client = OpenAI(api_key=api_key)
+
+        # Create HTTP client with explicit SSL certificate configuration
+        http_client = httpx.Client(
+            verify=certifi.where(),
+            timeout=30.0
+        )
+
+        self.client = OpenAI(api_key=api_key, http_client=http_client)
     
     def _build_system_prompt(self) -> str:
         """Build system prompt for the LLM."""

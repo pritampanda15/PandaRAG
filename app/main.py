@@ -13,6 +13,7 @@ import streamlit as st
 import torch
 from torch_geometric.data import Batch
 import pandas as pd
+import numpy as np
 
 from src.data import MolecularFeaturizer
 from src.models import GNNPredictor
@@ -48,7 +49,7 @@ def load_resources():
     
     checkpoint_path = "models/best_model.pt"
     if os.path.exists(checkpoint_path):
-        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
     
@@ -179,7 +180,7 @@ def main():
         
         with col2:
             if prop_info["type"] == "classification":
-                prob = 1 / (1 + (-prediction).__exp__()) if prediction < 0 else prediction
+                prob = 1 / (1 + np.exp(-prediction))
                 status = "Positive" if prob > 0.5 else "Negative"
                 st.metric("Classification", status)
         

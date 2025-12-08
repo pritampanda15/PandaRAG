@@ -86,7 +86,7 @@ def load_model(checkpoint_path: str, config: dict, input_dim: int, edge_dim: int
         edge_dim=edge_dim
     )
     
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
     

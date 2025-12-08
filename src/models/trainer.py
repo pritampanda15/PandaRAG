@@ -69,8 +69,7 @@ class Trainer:
             self.optimizer,
             mode="min",
             factor=0.5,
-            patience=10,
-            verbose=True
+            patience=10
         )
         
         if task_type == "regression":
@@ -284,7 +283,7 @@ class Trainer:
         Args:
             checkpoint_path: Path to checkpoint file.
         """
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         print(f"Loaded checkpoint from epoch {checkpoint['epoch']}")
         print(f"Validation metrics: {checkpoint['val_metrics']}")
