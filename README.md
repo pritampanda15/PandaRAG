@@ -180,15 +180,3 @@ OPENAI_API_KEY=your_key_here
 ## License
 
 MIT License
-
-## Citation
-
-If you use this project, please cite:
-
-```
-@software{admet_prediction_system,
-  title={ADMET Property Prediction with GNN and RAG Explanations},
-  year={2025},
-  url={https://github.com/yourusername/admet-prediction-system}
-}
-```
