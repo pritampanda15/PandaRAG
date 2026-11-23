@@ -1,37 +1,21 @@
-# Core Data Science
-numpy>=1.24.0
-pandas>=2.0.0
-scikit-learn>=1.3.0
+fastapi
+uvicorn
+pydantic
+numpy
+scipy
+scikit-learn
+networkx
+requests
+biopython
 
-# Deep Learning
-torch>=2.0.0
-torch-geometric>=2.4.0
+# Optional: generative answers, and neural embeddings via PANDARAG_EMBED_MODEL
+# anthropic
+# sentence-transformers
 
-# Molecular Processing
-rdkit>=2023.9.1
-PyTDC>=0.4.0
-
-# RAG Components
-chromadb>=0.4.0
-sentence-transformers>=2.2.0
-openai>=1.0.0
-langchain>=0.1.0
-langchain-openai>=0.0.5
-
-# MLOps
-mlflow>=2.9.0
-
-# Visualization
-matplotlib>=3.7.0
-seaborn>=0.12.0
-
-# Application
-streamlit>=1.29.0
-
-# Utilities
-python-dotenv>=1.0.0
-pyyaml>=6.0.0
-tqdm>=4.66.0
-
-# Document Processing
-pypdf>=3.17.0
+# Optional: Molecules, Screening and Repurposing labs
+# torch
+# torch-geometric
+# rdkit
+# jax
+# pandas
+# tqdm

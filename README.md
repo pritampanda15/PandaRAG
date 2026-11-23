@@ -1,182 +1,151 @@
-# ADMET Property Prediction System
+# PandaRAG
 
-A deep learning system that predicts Absorption, Distribution, Metabolism, Excretion, and Toxicity (ADMET) properties from molecular structures. The system combines Graph Neural Networks with a RAG-based LLM explainer to provide both predictions and mechanistic interpretations.
-
-## Project Overview
-
-| Component | Description |
-|-----------|-------------|
-| Domain | Preclinical Drug Development |
-| Core Task | Predict ADMET properties from SMILES molecular representations |
-| Model Architecture | Graph Neural Network (GNN) with message passing |
-| Explainability | RAG pipeline with pharmacokinetic knowledge base |
-| Output | Property predictions with evidence-based explanations |
-
-## ADMET Properties Predicted
-
-| Property | Category | Description |
-|----------|----------|-------------|
-| Caco-2 Permeability | Absorption | Intestinal absorption potential |
-| HIA | Absorption | Human Intestinal Absorption |
-| BBB Penetration | Distribution | Blood-Brain Barrier crossing |
-| Plasma Protein Binding | Distribution | Drug availability in bloodstream |
-| CYP450 Inhibition | Metabolism | Drug-drug interaction risk |
-| Half-life | Excretion | Duration in body |
-| hERG Inhibition | Toxicity | Cardiac toxicity risk |
-| AMES Toxicity | Toxicity | Mutagenicity |
-
-## Project Structure
-
-```
-admet-prediction-system/
-├── config/
-│   └── config.yaml              # Model and pipeline configuration
-├── data/
-│   ├── raw/                     # Original TDC datasets
-│   ├── processed/               # Featurized molecular graphs
-│   └── knowledge_base/          # RAG documents
-├── src/
-│   ├── data/
-│   │   ├── data_loader.py       # TDC data fetching
-│   │   └── molecular_featurizer.py  # SMILES to graph conversion
-│   ├── models/
-│   │   ├── gnn_model.py         # Graph Neural Network architecture
-│   │   └── trainer.py           # Training loop with MLflow
-│   ├── rag/
-│   │   ├── document_processor.py    # PDF and text ingestion
-│   │   ├── vector_store.py      # ChromaDB embeddings
-│   │   └── llm_explainer.py     # Explanation generation
-│   └── utils/
-│       └── helpers.py           # Utility functions
-├── scripts/
-│   ├── train_model.py           # Model training entry point
-│   ├── build_knowledge_base.py  # RAG index builder
-│   └── predict.py               # Inference script
-├── notebooks/
-│   └── 01_exploratory_analysis.ipynb
-├── app/
-│   └── main.py                  # Streamlit application
-├── requirements.txt
-└── README.md
-```
-
-## Installation
+A domain-agnostic RAG engine with a tab per capability, plus live wrappers around six
+research projects' working models.
 
 ```bash
-git clone https://github.com/yourusername/admet-prediction-system.git
-cd admet-prediction-system
-
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or: venv\Scripts\activate  # Windows
-
-pip install -r requirements.txt
+sh run.sh      # http://localhost:8787
 ```
 
-## Configuration
+Requires Python 3.10+. Install with `pip install -r requirements.txt`. That covers Ask, Knowledge
+and Graph; the commented extras in that file enable the rest.
 
-Edit `config/config.yaml` to set:
+Every lab reads a sibling project, so clone these **beside this repo**, all under
+`github.com/pritampanda15`:
 
-```yaml
-data:
-  dataset_name: "Caco2_Wang"
-  test_split: 0.2
-
-model:
-  hidden_dim: 128
-  num_layers: 3
-  dropout: 0.2
-  learning_rate: 0.001
-  epochs: 100
-
-rag:
-  embedding_model: "all-MiniLM-L6-v2"
-  llm_model: "gpt-4o-mini"
-  top_k: 5
+```
+ADMET-Prediction-System-Graph-Neural-Networks-with-RAG   Drug-Repurposing-Intelligence-System
+Literature-Intelligence                                  OncoMolML
+Oncology-Drug-Response-Prediction-System_DL-RAG          TC-DrugRAG
 ```
 
-## Usage
+A missing project only turns its own lab off; Ask, Knowledge and Graph never need one. The "live"
+states below describe the author's machine. Datasets and trained checkpoints for Repurposing are
+not included, and its R-GCN fixes and `train_ranking.py` are not yet published in that project.
 
-### Step 1: Download Data
+Optional environment:
+
+| Variable | Effect |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | Generative, cited answers via Claude. Without it the engine answers extractively — everything else is unchanged. |
+| `PANDARAG_MODEL` | Model id (default `claude-sonnet-5-5`). |
+| `PANDARAG_EMBED_MODEL` | A sentence-transformers model name (e.g. `BAAI/bge-small-en-v1.5`). Default is a local TF-IDF + SVD (LSA) embedder — no download, no network, but bag-of-words: this is the biggest single lever on retrieval quality. |
+| `PANDARAG_NCBI_EMAIL`, `NCBI_API_KEY` | PubMed etiquette and higher rate limits. |
+
+## Tabs
+
+- **Ask** — the pipeline, with every stage toggleable and traced.
+- **Knowledge** — workspaces and documents; paste or upload any text, any domain.
+- **Graph** — entity co-occurrence graph mined from your chunks, draggable, clustered.
+- **Literature** — live PubMed / bioRxiv search, one click to import abstracts.
+- **Molecules** — Caco-2 permeability from the trained GCN + RDKit descriptors.
+- **Screening** — JAX Morgan fingerprints, pairwise Tanimoto, MaxMin diverse subset.
+- **Causal** — build a mechanistic chain, score it with TC-DrugRAG's formula.
+- **Repurposing** — rank diseases for a compound over Hetionet, with an honest model card.
+- **Labs** — which repo modules are live on this machine, and the retrieval stack.
+
+## Pipeline
+
+Contextual chunking → query decomposition + HyDE → hybrid BM25 + dense retrieval fused
+with reciprocal rank fusion → GraphRAG entity expansion → MMR rerank → corrective
+grading (CRAG) → grounded generation with citations → self-reflection metrics
+(faithfulness, answer relevance, context precision).
+
+Nothing is domain-specific: the entity extractor, chunker and graph are text-only, so a
+workspace of contracts, incident reports or lecture notes behaves the same as one of papers.
+
+## Capacity
+
+Measured on this machine (synthetic ~230-word abstracts, 2.5 chunks each, extractive mode):
+
+| Documents | Chunks | Reindex | Warm query | Memory |
+| --- | --- | --- | --- | --- |
+| 500 | 1,272 | 0.5 s | 4 ms | 330 MB |
+| 2,000 | 5,072 | 2.1 s | 9 ms | 513 MB |
+| 10,000 | 25,252 | 14.7 s | 35 ms | 1.5 GB |
+
+Real run: 100 PubMed abstracts fetched in 3.2 s, imported in 34 ms, first query 479 ms
+(it pays for the reindex), every query after that 5 ms.
+
+**Bulk import is the cheap path.** `POST /workspaces/{id}/import` adds every paper and the
+index rebuilds once, on the next query. Adding documents one at a time pays that rebuild each
+time, which is what hurts above a few thousand documents.
+
+Comfortable today: a few thousand documents per workspace. Usable to ~10,000. The ceiling is
+the full refit (TF-IDF + SVD over every chunk) and the in-memory store — past that, split
+topics into separate workspaces, or make the index incremental and move the store to SQLite.
+
+## Repo wiring
+
+| Module | Repo | State on this machine |
+| --- | --- | --- |
+| ADMET GNN | `ADMET-Prediction-System-…-with-RAG` | live (trained checkpoint, epoch 69) |
+| Screening | `OncoMolML` | live (JAX fingerprints + Tanimoto + MaxMin) |
+| Literature | `Literature-Intelligence` | live (PubMed + bioRxiv clients) |
+| Causal KG | `TC-DrugRAG` | live (schemas + path scorer) |
+| Oncology KB | `Oncology-Drug-Response-…_DL-RAG` | live (seed corpus) |
+| Repurposing | `Drug-Repurposing-Intelligence-System` | live (Hetionet 47,031 nodes · trained checkpoint) |
+| Variant effects | `OncoMolML` | needs `tensorflow` |
+
+Screening needs `jax` (`pip install "jax[cpu]"`). `pykeen` is in the repurposing repo's
+pinned requirements but is imported nowhere in its source.
+
+**Repurposing runs on the real R-GCN.** Hetionet is downloaded (714 MB JSON → 47,031 nodes,
+2.25 M edges) and `DrugRepurposingModel` now encodes the whole graph: `flatten_hetero` maps the
+heterogeneous graph onto one node index space with a relation id per edge (24 relations, plus
+their inverses = 48), and `RGCNEncoder` runs basis-decomposition message passing over the
+~4.5 M directed edges before the MLP decoder scores a compound-disease pair. Message passing
+costs the same at any batch size, so training is full-batch: one encode per epoch.
+
+Three upstream stubs had to go first — `RGCNEncoder.forward` dropped its convolution result on
+the floor and passed `edge_type=0` for every edge, `DrugRepurposingModel` was marked *"Simplified
+model for now - use embeddings"*, and `Trainer.evaluate` returned a hardcoded `auc: 0.0`.
+
+**Results.** `train_ranking.py` draws negatives per drug and uses a listwise loss. All
+`Compound-treats-Disease` edges are removed from the message-passing graph, in training and when
+serving. Filtered ranking of 137 diseases on 114 held-out pairs (one seed, one random pair split):
+
+| Scorer | Median rank | Hits@1 | Hits@10 | MRR |
+| --- | --- | --- | --- | --- |
+| **R-GCN, treats edges removed** (served) | **3.5** | **0.360** | **0.737** | **0.479** |
+| Embeddings only, same loss | 7 | 0.149 | 0.623 | 0.301 |
+| Popularity only (ignores the drug) | 13 | 0.096 | 0.447 | 0.220 |
+
+The R-GCN was chosen over embeddings on validation MRR (0.390 vs 0.258). Drugs can appear in both
+train and test, so this does not measure performance on compounds with no known indication.
+
+**Leaked results, do not cite.** `ranking_model.pt` (MRR 0.674) and `rgcn_model.pt` (AUC 0.959 / AP
+0.872) kept held-out treats edges in the message-passing graph. With val/test edges removed at
+inference, `ranking_model.pt` falls to MRR 0.208. The app no longer loads either file.
+
+To rebuild from scratch, inside `Drug-Repurposing-Intelligence-System`:
 
 ```bash
-python scripts/train_model.py --download-only
+python3 scripts/download_data.py && python3 scripts/build_knowledge_graph.py
 ```
-
-### Step 2: Build Knowledge Base
 
 ```bash
-python scripts/build_knowledge_base.py --docs-path data/knowledge_base/
+python3 scripts/train_ranking.py
 ```
 
-### Step 3: Train Model
+Add `--no-graph --output models/checkpoints/ranking_nograph.pt` for the embedding baseline. Each run writes `<output>.metrics.json` beside
+its checkpoint, which is what the model card reads.
 
-```bash
-python scripts/train_model.py --config config/config.yaml
-```
+The repos are loaded by file path, so nothing has to be installed as a package and the
+heavy optional imports in their `__init__.py` files stay out of the way.
 
-### Step 4: Run Predictions
+## Look
 
-```bash
-python scripts/predict.py --smiles "CC(=O)OC1=CC=CC=C1C(=O)O" --explain
-```
+Warm paper, hairline rules, serif display (Newsreader) over IBM Plex Sans/Mono, ochre accent,
+archival plate line-art at the margins. A sepia-dark variant lives behind the theme toggle.
 
-### Step 5: Launch Application
-
-```bash
-streamlit run app/main.py
-```
-
-## Data Source
-
-This project uses the Therapeutics Data Commons (TDC) benchmark datasets:
-
-Huang, K., et al. "Therapeutics Data Commons: Machine Learning Datasets and Tasks for Drug Discovery and Development." NeurIPS 2021.
-
-Available at: https://tdcommons.ai/
-
-## Model Architecture
-
-The GNN follows a message passing paradigm:
-
-1. Atom features are initialized from molecular properties (atomic number, charge, hybridization)
-2. Bond features encode connectivity (bond type, aromaticity)
-3. Message passing layers aggregate neighbor information
-4. Global pooling produces a molecular fingerprint
-5. MLP head outputs property predictions
-
-## RAG Knowledge Sources
-
-The explanation system retrieves from:
-
-1. FDA Drug Labels (DailyMed)
-2. PubChem Compound Summaries
-3. Pharmacokinetic Textbook Excerpts
-4. ADMET Review Articles
-
-## MLflow Tracking
-
-Experiments are logged to MLflow:
-
-```bash
-mlflow ui --port 5000
-```
-
-Tracked metrics include:
-- Training and validation loss
-- AUROC for classification tasks
-- RMSE for regression tasks
-- Model hyperparameters
-- Feature importance
-
-## Environment Variables
-
-Create a `.env` file:
+## Layout
 
 ```
-OPENAI_API_KEY=your_key_here
+backend/   app.py (API) · rag.py (engine) · labs.py (repo wrappers) · llm.py · test_rag.py
+frontend/  index.html · app.css · app.js       # no build step
+data/      store.json                          # workspaces, written atomically (gitignored)
 ```
 
-## License
-
-MIT License
+`python3 backend/test_rag.py` checks retrieval, generation, the graph, the empty-workspace
+path and document removal.
