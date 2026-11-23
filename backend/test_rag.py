@@ -25,6 +25,37 @@ assert "ERCC1" in out["answer"], out["answer"]
 assert out["metrics"]["faithfulness"] >= 0.5, out["metrics"]
 assert out["sources"], "answer had no sources"
 
+# streaming: sources, then text, then a result that replaces the text if the LLM fails part-way
+saved = rag.llm.available, rag.llm.stream, rag.llm.complete
+rag.llm.available = lambda: False
+plain = ws.answer("What drives cisplatin resistance?")["answer"]
+events = list(ws.answer_stream("What drives cisplatin resistance?"))
+assert [next(iter(e)) for e in events] == ["sources", "result"] and events[-1]["result"]["answer"] == plain
+
+
+def broken(*a, **k):
+    yield "half an ans"
+    raise RuntimeError("max_tokens")
+
+
+rag.llm.available, rag.llm.complete = lambda: True, lambda *a: ""
+rag.llm.stream = lambda *a, **k: iter(["ERCC1 ", "drives it [1]. "])
+events = list(ws.answer_stream("What drives cisplatin resistance?"))
+assert [next(iter(e)) for e in events] == ["sources", "delta", "delta", "result"], events
+assert events[-1]["result"]["answer"] == "ERCC1 drives it [1]." and "generative" in events[-1]["result"]["mode"]
+rag.llm.stream = broken
+res = ws.answer("What drives cisplatin resistance?")
+assert res["answer"] == plain and "max_tokens" in res["mode"], res
+rag.llm.available, rag.llm.stream, rag.llm.complete = saved
+
+# a citation after the full stop belongs to the sentence before it
+two = [{"text": "Alpha kinase phosphorylates tubulin strongly.", "label": "relevant"},
+       {"text": "Omega lipid membranes absorb cholesterol slowly.", "label": "relevant"}]
+quoted = "Alpha kinase phosphorylates tubulin strongly. [1] Omega lipid membranes absorb cholesterol slowly. [2]"
+assert ws._reflect("q", quoted, two)["faithfulness"] == 1.0
+assert ws._reflect("q", quoted.replace("[1]", "[x]").replace("[2]", "[1]").replace("[x]", "[2]"), two)["faithfulness"] == 0
+assert ws._reflect("q", "Alpha kinase phosphorylates tubulin strongly [1].", two)["faithfulness"] == 1.0
+
 ents = rag.entities("We provide EGFR-mutant data; increase in kinase, stage III disease, osimertinib and PC-9 remain. "
                     "Combine MET-amplified KRAS with a peptide.")
 assert ents >= {"EGFR", "kinase", "osimertinib", "PC-9", "MET", "KRAS", "peptide"}, ents
@@ -79,6 +110,16 @@ def make_pdf(lines, password=None):
     return out.getvalue()
 
 
+body = [f"Unique sentence number {w} in the body text here." for w in "abcdefghijkl"]
+made = [f"ACS Omega Article\nPage {i + 1} of 4\nPatient {i + 1}\n{0.5 + i}\n" + "\n".join(f"{b} {i}" for b in body) +
+        f"\nACS Omega Article again {i}\n{56651 + i}" for i in range(4)]
+made[2] = made[2].replace(body[6] + " 2", "ACS Omega Article")   # same words mid-page are content
+kept = pdf.drop_running_lines(made)
+for i, page in enumerate(kept):
+    assert f"Patient {i + 1}" in page and str(0.5 + i) in page and body[0] in page and f"again {i}" in page, page
+    assert f"Page {i + 1}" not in page and str(56651 + i) not in page, page
+assert [p.splitlines().count("ACS Omega Article") for p in kept] == [0, 0, 1, 0], kept
+assert pdf.drop_running_lines(["Same title\nx", "Same title\ny"]) == ["Same title\nx", "Same title\ny"]
 got = pdf.extract(make_pdf(["Acquired resis-", "tance to EGFR-", "TKI therapy."]))
 assert got["pages"] == 1 and "resistance to EGFR-" in got["text"], got
 assert "resistance" in pdf.extract(make_pdf(["resistance"], password=""))["text"]

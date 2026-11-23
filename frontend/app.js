@@ -86,19 +86,14 @@ $("#q-chips").addEventListener("click", (e) => {
   if (e.target.classList.contains("chip")) { $("#q").value = e.target.textContent; $("#ask-btn").click(); }
 });
 
+const cited = (text) => esc(text).replace(/\[(\d+)\]/g, (_, n) => `<cite data-ref="${n}">${n}</cite>`);
+
 function renderAnswer(res) {
-  const wrap = $("#answer-wrap");
-  const body = esc(res.answer).replace(/\[(\d+)\]/g, (_, n) => `<cite data-ref="${n}">${n}</cite>`);
+  const wrap = $("#answer-wrap"), body = cited(res.answer);
   wrap.innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:12px">
       <span class="tag info">${esc(res.mode)}</span>
       <span class="eyebrow">${res.total_ms} ms · ${res.sources.length} passages</span></div>
     <div class="answer">${body}</div>`;
-  $$("cite", wrap).forEach((c) => c.onclick = () => {
-    const el = $$("#sources .src")[+c.dataset.ref - 1];
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
-  });
 
   $("#metrics").innerHTML = [["faithfulness", "Faithfulness"], ["answer_relevance", "Answer relevance"],
     ["context_precision", "Context precision"]].map(([k, label]) => {
@@ -111,7 +106,19 @@ function renderAnswer(res) {
     <div><b>${esc(t.stage)}</b><code>${esc(JSON.stringify(t.detail).slice(1, -1).replace(/"/g, ""))}</code></div>
     <div class="ms">${t.ms}ms</div></div>`).join("");
 
-  $("#sources").innerHTML = res.sources.length ? res.sources.map((s, i) => {
+  renderSources(res.sources);
+}
+
+// one listener, because streaming replaces the citations on every update
+$("#answer-wrap").addEventListener("click", (e) => {
+  const c = e.target.closest("cite"), el = c && $$("#sources .src")[+c.dataset.ref - 1];
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+});
+
+function renderSources(sources) {
+  $("#sources").innerHTML = sources.length ? sources.map((s, i) => {
     const cls = s.label === "relevant" ? "ok" : s.label === "ambiguous" ? "warn" : "bad";
     return `<div class="src"><h4><em>[${i + 1}]</em> ${esc(s.title)}</h4>
       <p>${esc(s.text)}</p>
@@ -126,6 +133,30 @@ function renderAnswer(res) {
   });
 }
 
+async function askStream(body) {
+  const r = await fetch(`/api/workspaces/${state.ws}/ask/stream`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `${r.status} ${r.statusText}`);
+  const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "", text = "", result = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    const lines = (buf + value).split("\n");
+    buf = lines.pop();
+    const before = text;
+    for (const ev of lines.map((l) => JSON.parse(l))) {
+      if (ev.error) throw new Error(ev.error);
+      if (ev.sources) renderSources(ev.sources);
+      if (ev.delta) text += ev.delta;
+      if (ev.result) result = ev.result;
+    }
+    if (text !== before && !result) $("#answer-wrap").innerHTML = `<div class="answer">${cited(text)}</div>`;
+  }
+  if (!result) throw new Error("The connection closed before the answer finished");
+  renderAnswer(result);
+}
+
 $("#ask-btn").onclick = async () => {
   const q = $("#q").value.trim();
   if (!q) return toast("Type a question first", true);
@@ -133,11 +164,12 @@ $("#ask-btn").onclick = async () => {
   const btn = $("#ask-btn"); btn.disabled = true; btn.textContent = "Retrieving…";
   $("#answer-wrap").innerHTML = '<div class="row"><span class="spin"></span><span style="color:var(--text-3)">running pipeline…</span></div>';
   try {
-    renderAnswer(await api(`/workspaces/${state.ws}/ask`, { body: { query: q, k: 6, ...state.opts } }));
+    $("#answer-wrap").setAttribute("aria-busy", "true");
+    await askStream({ query: q, k: 6, ...state.opts });
   } catch (e) {
     $("#answer-wrap").innerHTML = `<div class="empty"><b>Request failed</b>${esc(e.message)}</div>`;
     toast(e.message, true);
-  } finally { btn.disabled = false; btn.textContent = "Retrieve & answer"; }
+  } finally { $("#answer-wrap").removeAttribute("aria-busy"); btn.disabled = false; btn.textContent = "Retrieve & answer"; }
 };
 $("#q").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) $("#ask-btn").click(); });
 

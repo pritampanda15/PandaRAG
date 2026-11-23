@@ -19,7 +19,7 @@ Optional environment:
 
 | Variable | Effect |
 | --- | --- |
-| `ANTHROPIC_API_KEY` | Generative, cited answers via Claude. Without it the engine answers extractively — everything else is unchanged. |
+| `ANTHROPIC_API_KEY` | Generative, cited answers via Claude, streamed as they are written. Without it the engine answers extractively — everything else is unchanged. |
 | `PANDARAG_MODEL` | Model id (default `claude-sonnet-5-5`). |
 | `PANDARAG_EMBED_MODEL` | A sentence-transformers model name; naming one downloads it if needed. Unset, `BAAI/bge-small-en-v1.5` is used when `sentence-transformers` is installed and that model is already on disk, otherwise a local TF-IDF + SVD (LSA) embedder. `lsa` forces LSA. |
 | `PANDARAG_NCBI_EMAIL`, `NCBI_API_KEY` | PubMed etiquette and higher rate limits. |

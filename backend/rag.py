@@ -288,7 +288,7 @@ class Workspace:
             parts = [p.strip(" ?") for p in re.split(r"\?|;|\band\b|\bvs\.?\b|\bversus\b|\bcompared to\b", q) if len(p.strip().split()) >= 2]
             if llm.available():
                 try:
-                    out = llm.complete(f"Split this question into at most 3 standalone search queries, one per line, no numbering:\n{q}", max_tokens=200)
+                    out = llm.complete(f"Split this question into at most 3 standalone search queries, one per line, no numbering:\n{q}")
                     parts = [l.strip("-• ").strip() for l in out.splitlines() if l.strip()][:3]
                 except Exception:
                     pass
@@ -296,7 +296,7 @@ class Workspace:
         hyde = None
         if opts.get("hyde") and llm.available():
             try:
-                hyde = llm.complete(f"Write a short factual passage (3 sentences) that would answer: {q}", max_tokens=200)
+                hyde = llm.complete(f"Write a short factual passage (3 sentences) that would answer: {q}")
             except Exception:
                 hyde = None
         trace.append({"stage": "Query planning", "ms": int((time.time() - t) * 1000),
@@ -403,8 +403,14 @@ class Workspace:
 
     # ---------- generation ----------
     def answer(self, q, opts=None, k=6):
+        return list(self.answer_stream(q, opts, k))[-1]["result"]
+
+    def answer_stream(self, q, opts=None, k=6):
+        """Yield {"sources"}, then {"delta"} per piece of text, then {"result"}, which is authoritative:
+        if the LLM fails part-way the result replaces the text already sent."""
         t0 = time.time()
         hits, trace, crag = self.retrieve(q, opts, k)
+        yield {"sources": hits}
         t = time.time()
         if not hits:
             ans = ("I couldn't find grounded evidence for that in this workspace. "
@@ -413,21 +419,26 @@ class Workspace:
         elif llm.available():
             ctx = "\n\n".join(f"[{i+1}] ({h['title']}) {h['text']}" for i, h in enumerate(hits))
             try:
-                ans = llm.complete(
+                ans = ""
+                for piece in llm.stream(
                     f"Context passages:\n{ctx}\n\nQuestion: {q}\n\nAnswer using only the passages. Cite every claim with [n]. "
                     "If the passages don't cover something, say so plainly.",
-                    system=f"You are PandaRAG, a precise research assistant for the {self.domain} domain.")
+                    system=f"You are PandaRAG, a precise research assistant for the {self.domain} domain."):
+                    ans += piece
+                    yield {"delta": piece}
+                ans = ans.strip()
                 mode = f"generative · {llm.MODEL}"
             except Exception as e:
-                ans, mode = self._extractive(q, hits), f"extractive (LLM error: {type(e).__name__})"
+                why = e if type(e) is RuntimeError else type(e).__name__
+                ans, mode = self._extractive(q, hits), f"extractive (LLM error: {why})"
         else:
             ans, mode = self._extractive(q, hits), "extractive"
         trace.append({"stage": "Grounded generation", "ms": int((time.time() - t) * 1000), "detail": {"mode": mode}})
         t = time.time()
         metrics = self._reflect(q, ans, hits)
         trace.append({"stage": "Self-reflection", "ms": int((time.time() - t) * 1000), "detail": metrics})
-        return {"answer": ans, "sources": hits, "trace": trace, "metrics": metrics, "crag": crag,
-                "mode": mode, "total_ms": int((time.time() - t0) * 1000)}
+        yield {"result": {"answer": ans, "sources": hits, "trace": trace, "metrics": metrics, "crag": crag,
+                          "mode": mode, "total_ms": int((time.time() - t0) * 1000)}}
 
     def _extractive(self, q, hits, n=4):
         qtok = set(tokens(q))
@@ -451,6 +462,8 @@ class Workspace:
         if not hits:
             return {"faithfulness": 0, "answer_relevance": 0, "context_precision": 0}
         support = [set(tokens(h["text"])) for h in hits]
+        # "Claim. [1] Next" would split with [1] on the wrong side, crediting it to the next sentence
+        ans = re.sub(r"([.!?])((?:\s*\[\d+\])+)", r"\2\1", ans)
         sents_ = [s for s in sentences(ans) if len(tokens(s)) >= 3]
         ok = 0
         for s in sents_:

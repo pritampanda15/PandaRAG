@@ -1,12 +1,14 @@
 """PandaRAG API."""
+import json
+import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse
+from fastapi.concurrency import iterate_in_threadpool, run_in_threadpool
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -153,6 +155,30 @@ def ask(wid: str, body: AskIn):
     ws = get_ws(wid)
     opts = body.model_dump(exclude={"query", "k"})
     return ws.answer(body.query, opts, max(1, min(body.k, 12)))
+
+
+@app.post("/api/workspaces/{wid}/ask/stream")
+def ask_stream(wid: str, body: AskIn, request: Request):
+    """Same as /ask, as one JSON event per line."""
+    if not body.query.strip():
+        raise HTTPException(400, "query is empty")
+    ws = get_ws(wid)
+    opts = body.model_dump(exclude={"query", "k"})
+
+    events = ws.answer_stream(body.query, opts, max(1, min(body.k, 12)))
+
+    async def lines():
+        try:
+            async for event in iterate_in_threadpool(events):
+                if await request.is_disconnected():   # stop paying for an answer nobody is reading
+                    return
+                yield json.dumps(event) + "\n"
+        except Exception as e:   # the 200 has already gone out
+            logging.exception("ask failed")
+            yield json.dumps({"error": f"{type(e).__name__}: {e}"}) + "\n"
+        finally:
+            events.close()
+    return StreamingResponse(lines(), media_type="application/x-ndjson")
 
 
 @app.get("/api/workspaces/{wid}/graph")
