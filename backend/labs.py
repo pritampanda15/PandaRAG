@@ -10,6 +10,7 @@ from collections import defaultdict
 import importlib.util
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -22,6 +23,18 @@ REPOS = {
     "oncomolml": ROOT / "OncoMolML",
     "causal": ROOT / "TC-DrugRAG",
 }
+
+
+def once(fn):
+    """lru_cache runs fn twice if two threads miss together; a second import then sees a half-loaded
+    module, and _repurposing's chdir can be left unrestored. Failures are not cached, so they retry."""
+    cached, lock = functools.lru_cache(maxsize=1)(fn), threading.Lock()
+
+    @functools.wraps(fn)
+    def wrapper():
+        with lock:
+            return cached()
+    return wrapper
 
 
 def load_module(name, path):
@@ -63,12 +76,16 @@ def load_submodule(pkg, path, subdirs):
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
-    spec.loader.exec_module(mod)
+    try:
+        spec.loader.exec_module(mod)
+    except BaseException:
+        del sys.modules[name]   # or the next call would return it half-loaded
+        raise
     return mod
 
 
 # ---------------------------------------------------------------- ADMET (live model)
-@functools.lru_cache(maxsize=1)
+@once
 def _admet():
     import torch
     r = REPOS["admet"]
@@ -118,7 +135,7 @@ def admet_predict(smiles: str):
 
 
 # ---------------------------------------------------------------- Literature (live APIs)
-@functools.lru_cache(maxsize=1)
+@once
 def _clients():
     r = REPOS["literature"]
     pm = load_module("pr_pubmed", r / "src/clients/pubmed_client.py")
@@ -147,7 +164,7 @@ def literature_search(query: str, sources=("pubmed",), max_results=12, days_back
 
 
 # ---------------------------------------------------------------- Causal KG (TC-DrugRAG)
-@functools.lru_cache(maxsize=1)
+@once
 def _causal():
     """TC-DrugRAG schemas + path scorer, imported with their relative imports intact."""
     root = REPOS["causal"] / "src"
@@ -192,7 +209,7 @@ def score_causal_path(edges):
 
 
 # ---------------------------------------------------------------- Screening (OncoMolML, JAX)
-@functools.lru_cache(maxsize=1)
+@once
 def _jax_models():
     return load_module("pr_jax", REPOS["oncomolml"] / "oncomolml/models/jax_models.py")
 
@@ -272,7 +289,7 @@ def repurposing_status():
             "missing": missing, "checkpoints": ckpts, "data_files": len(graph_files)}
 
 
-@functools.lru_cache(maxsize=1)
+@once
 def _repurposing():
     """Hetionet loader + the trained link-prediction checkpoint."""
     import torch

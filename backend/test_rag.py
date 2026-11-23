@@ -91,7 +91,46 @@ for bad, why in ((make_pdf([]), "scanned"), (b"not a pdf", "could not read"), (b
     else:
         raise AssertionError(f"accepted a PDF that should fail: {why}")
 
+import tempfile
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import labs
+
+# two first requests at once must load a lab a single time
+runs, start = [], threading.Barrier(4)
+
+
+@labs.once
+def slow():
+    runs.append(1)
+    time.sleep(0.1)
+    return len(runs)
+
+
+def hit(fn):
+    start.wait()
+    return fn()
+
+
+with ThreadPoolExecutor(4) as pool:
+    assert list(pool.map(hit, [slow] * 4)) == [1] * 4 and len(runs) == 1
+    assert len({id(x[1].CausalPathScorer) for x in pool.map(hit, [labs._causal] * 4)}) == 1
+
+# a module that fails to load must be retried, not returned half-loaded
+with tempfile.TemporaryDirectory() as tmp:
+    mod = Path(tmp) / "m.py"
+    mod.write_text("raise RuntimeError")
+    try:
+        labs.load_submodule("pr_test", mod, [])
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("broken module loaded")
+    assert "pr_test.m" not in sys.modules
+    mod.write_text("value = 12345")
+    assert labs.load_submodule("pr_test", mod, []).value == 12345
 
 sc = labs.screen(["CC(=O)Oc1ccccc1C(=O)O", "CC(C)Cc1ccc(C(C)C(=O)O)cc1", "Cn1cnc2c1c(=O)n(C)c(=O)n2C", "notasmiles"], n_select=2)
 assert sc["failed"] == ["notasmiles"], sc["failed"]
