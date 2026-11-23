@@ -7,6 +7,8 @@ scikit-learn
 networkx
 requests
 biopython
+pypdf
+cryptography
 
 # Optional: generative answers, and neural embeddings via PANDARAG_EMBED_MODEL
 # anthropic

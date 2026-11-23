@@ -27,7 +27,7 @@ Optional environment:
 ## Tabs
 
 - **Ask** — the pipeline, with every stage toggleable and traced.
-- **Knowledge** — workspaces and documents; paste or upload any text, any domain.
+- **Knowledge** — workspaces and documents; paste text, or upload a text file or PDF (up to 50 MB; scanned PDFs need OCR first), any domain.
 - **Graph** — entity co-occurrence graph mined from your chunks, draggable, clustered.
 - **Literature** — live PubMed / bioRxiv search, one click to import abstracts.
 - **Molecules** — Caco-2 permeability from the trained GCN + RDKit descriptors.
@@ -155,7 +155,7 @@ archival plate line-art at the margins. A sepia-dark variant lives behind the th
 ## Layout
 
 ```
-backend/   app.py (API) · rag.py (engine) · labs.py (repo wrappers) · llm.py · test_rag.py
+backend/   app.py (API) · rag.py (engine) · pdf.py · labs.py (repo wrappers) · llm.py · test_rag.py
 projects/  the six research projects' modules the labs load
 frontend/  index.html · app.css · app.js       # no build step
 data/      store.json                          # workspaces, written atomically (gitignored)

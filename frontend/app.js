@@ -6,8 +6,8 @@ const state = { ws: null, opts: {}, lit: [], graph: null };
 async function api(path, opts) {
   const r = await fetch("/api" + path, {
     method: opts?.body ? "POST" : opts?.method || "GET",
-    headers: opts?.body ? { "Content-Type": "application/json" } : undefined,
-    body: opts?.body ? JSON.stringify(opts.body) : undefined,
+    headers: opts?.body && !(opts.body instanceof Blob) ? { "Content-Type": "application/json" } : undefined,
+    body: opts?.body instanceof Blob ? opts.body : opts?.body ? JSON.stringify(opts.body) : undefined,
     ...(opts?.method ? { method: opts.method } : {}),
   });
   const data = await r.json().catch(() => ({}));
@@ -168,8 +168,15 @@ $("#d-add").onclick = async () => {
 $("#d-file").onclick = () => $("#d-input").click();
 $("#d-input").onchange = async (e) => {
   const f = e.target.files[0]; if (!f) return;
-  $("#d-text").value = await f.text(); $("#d-title").value ||= f.name.replace(/\.\w+$/, "");
-  e.target.value = ""; toast("File loaded — review, then ingest");
+  const btn = $("#d-file"), label = btn.textContent;
+  btn.disabled = $("#d-add").disabled = true; btn.textContent = "Reading…";
+  try {
+    const pdf = /\.pdf$/i.test(f.name) ? await api("/pdf", { body: f }) : null;
+    $("#d-text").value = pdf ? pdf.text : await f.text(); $("#d-title").value ||= f.name.replace(/\.\w+$/, "");
+    const blank = pdf?.blank ? `, ${pdf.blank} without text` : "";
+    toast(pdf ? `${pdf.pages} page${pdf.pages > 1 ? "s" : ""}${blank} — review, then ingest` : "File loaded — review, then ingest");
+  } catch (err) { toast(err.message, true); }
+  finally { e.target.value = ""; btn.disabled = $("#d-add").disabled = false; btn.textContent = label; }
 };
 $("#w-add").onclick = async () => {
   const name = $("#w-name").value.trim();

@@ -4,15 +4,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import labs
 import llm
+import pdf
 import rag
 
+MAX_PDF = 50 * 1024 * 1024
 FRONTEND = Path(__file__).parent.parent / "frontend"
 app = FastAPI(title="PandaRAG")
 store = rag.Store()
@@ -119,6 +122,20 @@ def add_doc(wid: str, body: DocIn):
         d = get_ws(wid).add(body.title, body.text, body.source)
         store.save()
     return {"id": d["id"], "title": d["title"]}
+
+
+@app.post("/api/pdf")
+async def pdf_text(request: Request):
+    """Raw PDF body in, text out; the page shows it for review before it is ingested."""
+    data = bytearray()
+    async for part in request.stream():
+        data += part
+        if len(data) > MAX_PDF:
+            raise HTTPException(413, "PDF is larger than 50 MB")
+    try:
+        return await run_in_threadpool(pdf.extract, bytes(data))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
 
 @app.delete("/api/workspaces/{wid}/docs/{did}")

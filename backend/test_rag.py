@@ -57,6 +57,40 @@ assert empty.answer("anything")["sources"] == [], "empty workspace should return
 ws.remove(list(ws.docs)[0])
 assert len(ws.docs) == 1 and all(c["doc"] in ws.docs for c in ws.chunks), "removal left orphan chunks"
 
+import io
+import pdf
+import pypdf
+
+
+def make_pdf(lines, password=None):
+    w = pypdf.PdfWriter()
+    page = w.add_blank_page(300, 300)
+    if lines:
+        N, D = pypdf.generic.NameObject, pypdf.generic.DictionaryObject
+        font = D({N("/Type"): N("/Font"), N("/Subtype"): N("/Type1"), N("/BaseFont"): N("/Helvetica")})
+        page[N("/Resources")] = D({N("/Font"): D({N("/F1"): font})})
+        s = pypdf.generic.DecodedStreamObject()
+        s.set_data(("BT /F1 12 Tf 20 200 Td " + " ".join(f"({x}) Tj 0 -20 Td" for x in lines) + " ET").encode())
+        page[N("/Contents")] = w._add_object(s)
+    if password is not None:
+        w.encrypt(password, "owner", algorithm="AES-256")
+    out = io.BytesIO()
+    w.write(out)
+    return out.getvalue()
+
+
+got = pdf.extract(make_pdf(["Acquired resis-", "tance to EGFR-", "TKI therapy."]))
+assert got["pages"] == 1 and "resistance to EGFR-" in got["text"], got
+assert "resistance" in pdf.extract(make_pdf(["resistance"], password=""))["text"]
+for bad, why in ((make_pdf([]), "scanned"), (b"not a pdf", "could not read"), (b"", "could not read"),
+                 (make_pdf(["x"], password="secret"), "password")):
+    try:
+        pdf.extract(bad)
+    except ValueError as e:
+        assert why in str(e), (why, e)
+    else:
+        raise AssertionError(f"accepted a PDF that should fail: {why}")
+
 import labs
 
 sc = labs.screen(["CC(=O)Oc1ccccc1C(=O)O", "CC(C)Cc1ccc(C(C)C(=O)O)cc1", "Cn1cnc2c1c(=O)n(C)c(=O)n2C", "notasmiles"], n_select=2)
