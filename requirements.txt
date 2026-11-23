@@ -11,6 +11,7 @@ biopython
 # Optional: generative answers, and neural embeddings via PANDARAG_EMBED_MODEL
 # anthropic
 # sentence-transformers
+# Benchmark only: pandas, pyarrow, huggingface_hub
 
 # Optional: Molecules, Screening and Repurposing labs
 # torch

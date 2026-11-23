@@ -6,7 +6,9 @@ Pipeline (each stage toggleable, each traced for the UI):
   -> corrective grading (CRAG) -> grounded generation with citations
   -> self-reflection metrics (faithfulness / relevance / context precision).
 """
+import functools
 import json
+import math
 import os
 import re
 import threading
@@ -29,6 +31,23 @@ those it its into than then there their they them we our you your he she his her
 will shall do does did have has had which who whom what when where why how all any each more most other some such only own
 same so too very also about over under between through during before after above below up down out off again further once
 here both few nor s t just don now via using use used based within without per among across whereas however thus""".split())
+# Everyday words that share an ending with drugs, enzymes and compounds (provide/peptide, increase/kinase).
+# shortcut: a hand-kept list, so rarer words still slip through; upgrade to a real NER model if that matters.
+NOT_ENTITY = set("""provide provided divide decide inside outside beside aside alongside worldwide nationwide guide override
+coincide reside collide subside preside increase decrease release disease purchase database phrase please lease crease
+showcase phase erase chase bookcase uppercase lowercase staircase suitcase briefcase
+define refine redefine combine examine determine undermine medicine machine baseline online offline engine imagine decline
+pipeline guideline routine outline discipline murine marine timeline deadline headline magazine vaccine doctrine feminine
+masculine genuine confine intertwine incline underline streamline airline frontline cuisine canine
+equine bovine porcine intestine uterine
+remain domain certain obtain contain explain maintain retain sustain attain pertain constrain restrain terrain mountain
+fountain captain bargain curtain britain uncertain entertain complain refrain abstain ascertain
+begin margin origin within herein therein wherein thin skin basin cabin robin virgin ruin admin plugin login builtin
+someone anyone everyone alone standalone milestone undergone postpone telephone cornerstone backbone headphone smartphone microphone
+gone done none zone
+control protocol school symbol patrol petrol preschool carpool enrol
+describe prescribe subscribe inscribe transcribe ascribe""".split())
+ROMAN = re.compile(r"[IVX]+$")
 SENT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\[(])")
 TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9\-]+")
 
@@ -43,9 +62,10 @@ def sentences(text):
 
 def entities(text):
     """Cheap entity spotter: capitalised phrases, acronyms, gene-like and alphanumeric identifiers."""
-    found = re.findall(r"\b(?:[A-Z][a-z]+(?:[\s-][A-Z][a-z]+)+|[A-Z]{2,}[0-9A-Z\-]*|[A-Za-z]+[0-9]+[A-Za-z0-9]*)\b", text)
+    found = re.findall(r"\b(?:[A-Z][a-z]+(?:[\s-][A-Z][a-z]+)+|[A-Z]{2,}[0-9A-Z]*(?:-[0-9A-Z]+)*|[A-Za-z]+[0-9]+[A-Za-z0-9]*)\b", text)
     found += [w for w in re.findall(r"\b[a-z]{6,}\b", text) if w.endswith(("ib", "mab", "in", "ol", "ase", "one", "ide", "ine"))]
-    return {e.strip() for e in found if e.lower() not in STOP and len(e) > 2}
+    return {e for e in (f.strip() for f in found)
+            if len(e) > 2 and e.lower() not in STOP and e not in NOT_ENTITY and not ROMAN.match(e)}
 
 
 def chunk_text(text, size=110, overlap=25):
@@ -106,15 +126,35 @@ class BM25:
         return np.asarray(self.matrix[idx].multiply(reps).sum(axis=0)).ravel()
 
 
-class Embedder:
-    """Dense vectors. Sentence-Transformers if PANDARAG_EMBED_MODEL is set, else local LSA (TF-IDF + SVD)."""
+DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
+BGE_QUERY = "Represent this sentence for searching relevant passages: "
 
-    def __init__(self):
-        self.name = os.getenv("PANDARAG_EMBED_MODEL")
-        self.st = None
-        if self.name:
-            from sentence_transformers import SentenceTransformer
-            self.st = SentenceTransformer(self.name)
+
+@functools.lru_cache(maxsize=1)
+def neural_model():
+    """(name, model), or (None, None) for LSA. PANDARAG_EMBED_MODEL picks a model (downloading it if
+    needed) and "lsa" turns neural off. Unset, the default is used only if already on disk, so the
+    app never downloads anything by itself."""
+    name = os.getenv("PANDARAG_EMBED_MODEL")
+    if name == "lsa":
+        return None, None
+    try:
+        from sentence_transformers import SentenceTransformer
+        return name or DEFAULT_MODEL, SentenceTransformer(
+            name or DEFAULT_MODEL, local_files_only=not name,
+            device="cpu")  # Apple's GPU backend ran out of memory indexing 12k chunks, and is not thread-safe
+    except (ImportError, OSError):
+        if name:
+            raise
+        return None, None
+
+
+class Embedder:
+    """Dense vectors: a sentence-transformers model if available, else local LSA (TF-IDF + SVD)."""
+
+    def __init__(self, cache=None):
+        self.name, self.st = neural_model()
+        self.cache = {} if cache is None else cache   # text -> vector, so a rebuild only encodes new chunks
 
     def fit(self, texts):
         if self.st:
@@ -126,10 +166,18 @@ class Embedder:
         if self.svd:
             self.svd.fit(X)
 
-    def encode(self, texts):
+    def encode(self, texts, query=False):
         if self.st:
-            v = self.st.encode(texts, normalize_embeddings=True)
-            return np.asarray(v)
+            if query:
+                prefix = BGE_QUERY if "bge-" in self.name.lower() and "-en" in self.name.lower() else ""
+                return np.asarray(self.st.encode([prefix + t for t in texts], normalize_embeddings=True))
+            new = [t for t in dict.fromkeys(texts) if t not in self.cache]
+            if new:
+                self.cache.update(zip(new, np.asarray(self.st.encode(new, normalize_embeddings=True, batch_size=64))))
+            keep = set(texts)
+            for t in [t for t in self.cache if t not in keep]:
+                del self.cache[t]
+            return np.stack([self.cache[t] for t in texts])
         X = self.tfidf.transform(texts)
         v = self.svd.transform(X) if self.svd else X.toarray()
         return v / (np.linalg.norm(v, axis=1, keepdims=True) + 1e-9)
@@ -139,11 +187,21 @@ class Embedder:
         return self.name or "LSA-256 (local)"
 
 
-def rrf(rankings, k=60):
+# Weights of each list in the fusion (BM25 is 1), tuned on SciFact with benchmark.py.
+GRAPH_WEIGHT, NEIGHBOUR_WEIGHT = 0.25, 0.3
+MMR_NEURAL, MMR_LSA = 0.72, 0.95   # relevance against diversity
+LSA_WEIGHT = 0.1   # LSA ranks worse than BM25, so it should not get an equal vote
+# Off-topic questions: how similar the model calls unrelated text, which CRAG treats as zero.
+PROBES = ["How do I reset my router password?", "Best pizza dough recipe", "Who won the football match last night?",
+          "Cheap flights to Lisbon in May", "How to tune a guitar", "Replace a bicycle tyre",
+          "What time does the library open?", "Plot of a romantic comedy film"]
+
+
+def rrf(rankings, weights=None, k=60):
     fused = defaultdict(float)
-    for r in rankings:
+    for r, w in zip(rankings, weights or [1] * len(rankings)):
         for rank, idx in enumerate(r):
-            fused[idx] += 1.0 / (k + rank + 1)
+            fused[idx] += w / (k + rank + 1)
     return sorted(fused, key=fused.get, reverse=True), fused
 
 
@@ -156,6 +214,7 @@ class Workspace:
         self._dirty = True
         # Sync endpoints run in a threadpool, so two readers can race into build().
         self._lock = threading.Lock()
+        self._vec_cache = {}
 
     # ---------- ingestion ----------
     def add(self, title, text, source="manual"):
@@ -183,11 +242,14 @@ class Workspace:
                 return
             texts = [f"{c['ctx']} {c['text']}" for c in self.chunks]
             bm25 = BM25([tokens(t) for t in texts])
-            embedder = Embedder()
+            embedder = Embedder(self._vec_cache)
             vecs = np.zeros((0, 1))
+            floor = 0.0
             if texts:
                 embedder.fit(texts)
                 vecs = embedder.encode(texts)
+                if embedder.st:
+                    floor = float(np.median(embedder.encode(PROBES, query=True) @ vecs.T))
             chunk_ents = [entities(c["text"]) for c in self.chunks]
             g = nx.Graph()
             for i, ents in enumerate(chunk_ents):
@@ -200,6 +262,7 @@ class Workspace:
                         g.add_edge(ents[a], ents[b], weight=w + 1)
             # Publish together, so a concurrent reader never sees a half-swapped index.
             self.bm25, self.embedder, self.vecs, self.chunk_ents, self.graph = bm25, embedder, vecs, chunk_ents, g
+            self.floor = floor
             self._dirty = False
 
     def graph_view(self, limit=70):
@@ -249,42 +312,56 @@ class Workspace:
         queries, hyde = self.plan(q, opts, trace)
 
         t = time.time()
-        rankings, pool_n = [], 40
+        rankings, weights, pool_n = [], [], 40
+        dense_w = 1 if self.embedder.st else LSA_WEIGHT
         dense_texts = queries + ([hyde] if hyde else [])
-        qv = self.embedder.encode(dense_texts)
+        qv = self.embedder.encode(dense_texts, query=True)
         for i, qq in enumerate(queries):
             if opts["hybrid"]:
-                rankings.append(list(np.argsort(-self.bm25.scores(tokens(qq)))[:pool_n]))
-            rankings.append(list(np.argsort(-(self.vecs @ qv[i]))[:pool_n]))
+                rankings.append(list(np.argsort(-self.bm25.scores(tokens(qq)))[:pool_n])); weights.append(1)
+            rankings.append(list(np.argsort(-(self.vecs @ qv[i]))[:pool_n])); weights.append(dense_w)
         if hyde:
-            rankings.append(list(np.argsort(-(self.vecs @ qv[-1]))[:pool_n]))
-        order, fused = rrf(rankings)
+            rankings.append(list(np.argsort(-(self.vecs @ qv[-1]))[:pool_n])); weights.append(dense_w)
+        order, fused = rrf(rankings, weights)
         trace.append({"stage": "Hybrid retrieval" if opts["hybrid"] else "Dense retrieval", "ms": int((time.time() - t) * 1000),
                       "detail": {"lists_fused": len(rankings), "candidates": len(order), "embedder": self.embedder.label}})
 
         t = time.time()
-        graph_hits = []
+        graph_hits = set()
         if opts["graph"] and self.graph.number_of_nodes():
-            q_ents = {e for e in self.graph.nodes if e.lower() in q.lower()} | (entities(q) & set(self.graph.nodes))
+            # Whole words only: a plain substring test finds MET in "method" and RAS in "KRAS".
+            padded = f" {re.sub(r'[^a-z0-9]+', ' ', q.lower())} "
+            names = ((e, re.sub(r"[^a-z0-9]+", " ", e.lower()).strip()) for e in self.graph.nodes)
+            q_ents = {e for e, n in names if f" {n} " in padded or f" {n}s " in padded} | (entities(q) & set(self.graph.nodes))
+            def idf(e):
+                return math.log(1 + len(self.chunks) / len(self.graph.nodes[e]["chunks"]))
+
             nbrs = set()
             for e in q_ents:
-                nbrs |= {n for n, _ in sorted(self.graph[e].items(), key=lambda x: -x[1]["weight"])[:4]}
+                # rare co-occurring entities first; raw counts just return the corpus's hubs
+                nbrs |= set(sorted(self.graph[e], key=lambda n: -self.graph[e][n]["weight"] * idf(n))[:4])
+            nbrs -= q_ents
+            gscore = defaultdict(float)
             for e in q_ents | nbrs:
                 for ci in self.graph.nodes[e]["chunks"]:
-                    fused[ci] += (0.02 if e in q_ents else 0.006)
-                    graph_hits.append(ci)
+                    gscore[ci] += idf(e) * (1 if e in q_ents else NEIGHBOUR_WEIGHT)
+            # One more list in the fusion, so the graph can nudge the order but not outvote the searches.
+            graph_hits = set(sorted(gscore, key=gscore.get, reverse=True)[:pool_n])
+            for rank, ci in enumerate(sorted(graph_hits, key=gscore.get, reverse=True)):
+                fused[ci] += GRAPH_WEIGHT / (60 + rank + 1)
             order = sorted(fused, key=fused.get, reverse=True)
             trace.append({"stage": "GraphRAG expansion", "ms": int((time.time() - t) * 1000),
-                          "detail": {"seed_entities": sorted(q_ents)[:8], "neighbours": sorted(nbrs)[:8], "chunks_boosted": len(set(graph_hits))}})
+                          "detail": {"seed_entities": sorted(q_ents)[:8], "neighbours": sorted(nbrs)[:8], "chunks_boosted": len(graph_hits)}})
 
         t = time.time()
         cand = order[:30]
         rel = self.vecs[cand] @ qv[0]
         if opts["rerank"]:
             # MMR: balance relevance to the query against redundancy with already-picked chunks.
-            picked, lam = [], 0.72
+            picked, lam = [], MMR_NEURAL if self.embedder.st else MMR_LSA
             fz = np.array([fused[c] for c in cand]); fz = fz / (fz.max() + 1e-9)
-            base = 0.5 * fz + 0.5 * (rel - rel.min()) / (np.ptp(rel) + 1e-9)
+            mix = 0.5 * dense_w
+            base = (1 - mix) * fz + mix * (rel - rel.min()) / (np.ptp(rel) + 1e-9)
             while len(picked) < min(k, len(cand)):
                 best, bs = None, -1e9
                 for j in range(len(cand)):
@@ -306,7 +383,7 @@ class Workspace:
         for ci, score in final:
             c = self.chunks[ci]
             overlap = len(qtok & set(tokens(c["text"] + " " + c["ctx"]))) / (len(qtok) or 1)
-            cos = float(self.vecs[ci] @ qv[0])
+            cos = (float(self.vecs[ci] @ qv[0]) - self.floor) / (1 - self.floor)
             grade = 0.55 * overlap + 0.45 * max(cos, 0)
             label = "relevant" if grade >= 0.35 else "ambiguous" if grade >= 0.15 else "irrelevant"
             results.append({"chunk": c["id"], "doc": c["doc"], "title": self.docs[c["doc"]]["title"],

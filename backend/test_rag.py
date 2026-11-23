@@ -25,6 +25,29 @@ assert "ERCC1" in out["answer"], out["answer"]
 assert out["metrics"]["faithfulness"] >= 0.5, out["metrics"]
 assert out["sources"], "answer had no sources"
 
+ents = rag.entities("We provide EGFR-mutant data; increase in kinase, stage III disease, osimertinib and PC-9 remain. "
+                    "Combine MET-amplified KRAS with a peptide.")
+assert ents >= {"EGFR", "kinase", "osimertinib", "PC-9", "MET", "KRAS", "peptide"}, ents
+assert not ents & {"provide", "increase", "remain", "disease", "EGFR-", "MET-", "III"}, ents
+gw = rag.Workspace("g", "Test")
+gw.add("g", "MET and RAS signalling interact with EGFR in tumours.")
+_, tr, _ = gw.retrieve("Which method covers EGFRs and KRAS?")
+seeds = next(x for x in tr if x["stage"] == "GraphRAG expansion")["detail"]["seed_entities"]
+assert seeds == ["EGFR"], seeds
+
+# graph expansion may reorder, but must not let a hub entity outvote the searches
+assert rag.GRAPH_WEIGHT < 1
+fused = rag.rrf([[0, 1], [1, 0]], [1, 0.1])[0]
+assert fused == [0, 1], "a low-weight list overturned the main one"
+
+if ws.embedder.st:   # neural: a rebuild re-encodes only new chunks, and removed ones leave the cache
+    before = dict(ws._vec_cache)
+    did = ws.add("Tmp", "Docetaxel is a taxane that stabilises microtubules in dividing tumour cells.")["id"]
+    ws.build()
+    assert all(ws._vec_cache[t] is v for t, v in before.items()) and len(ws._vec_cache) == len(before) + 1
+    ws.remove(did); ws.build()
+    assert set(ws._vec_cache) == set(before)
+
 g = ws.graph_view()
 assert g["nodes"], "entity graph empty"
 

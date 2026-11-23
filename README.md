@@ -21,7 +21,7 @@ Optional environment:
 | --- | --- |
 | `ANTHROPIC_API_KEY` | Generative, cited answers via Claude. Without it the engine answers extractively — everything else is unchanged. |
 | `PANDARAG_MODEL` | Model id (default `claude-sonnet-5-5`). |
-| `PANDARAG_EMBED_MODEL` | A sentence-transformers model name (e.g. `BAAI/bge-small-en-v1.5`). Default is a local TF-IDF + SVD (LSA) embedder — no download, no network, but bag-of-words: this is the biggest single lever on retrieval quality. |
+| `PANDARAG_EMBED_MODEL` | A sentence-transformers model name; naming one downloads it if needed. Unset, `BAAI/bge-small-en-v1.5` is used when `sentence-transformers` is installed and that model is already on disk, otherwise a local TF-IDF + SVD (LSA) embedder. `lsa` forces LSA. |
 | `PANDARAG_NCBI_EMAIL`, `NCBI_API_KEY` | PubMed etiquette and higher rate limits. |
 
 ## Tabs
@@ -46,7 +46,27 @@ grading (CRAG) → grounded generation with citations → self-reflection metric
 Nothing is domain-specific: the entity extractor, chunker and graph are text-only, so a
 workspace of contracts, incident reports or lecture notes behaves the same as one of papers.
 
+## Retrieval quality
+
+`python3 backend/benchmark.py` scores every configuration on human-labelled BEIR test sets (needs
+`pandas`, `pyarrow` and `huggingface_hub`). nDCG@10:
+
+| | SciFact (tuned on) | NFCorpus (check) |
+| --- | --- | --- |
+| BM25 only | 0.629 | 0.298 |
+| Old pipeline, LSA, all stages | 0.546 | 0.288 |
+| LSA, all stages | 0.612 | 0.297 |
+| **bge-small, all stages** | **0.714** | **0.356** |
+
+With LSA the full pipeline is still no better than BM25 alone; install the neural model for real gains.
+SciFact was used for tuning on its test queries, so treat that column as optimistic. Both sets are
+biomedical; HyDE and generated answers need an API key and are not measured.
+
 ## Capacity
+
+Timings below are for LSA. bge-small indexes about 85 chunks per second on a laptop CPU, so 12,000
+chunks take about 2.5 minutes after each restart; added documents encode only their own chunks.
+
 
 Measured on this machine (synthetic ~230-word abstracts, 2.5 chunks each, extractive mode):
 
