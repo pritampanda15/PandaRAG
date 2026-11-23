@@ -1,0 +1,21 @@
+fastapi
+uvicorn
+pydantic
+numpy
+scipy
+scikit-learn
+networkx
+requests
+biopython
+
+# Optional: generative answers, and neural embeddings via PANDARAG_EMBED_MODEL
+# anthropic
+# sentence-transformers
+
+# Optional: Molecules, Screening and Repurposing labs
+# torch
+# torch-geometric
+# rdkit
+# jax
+# pandas
+# tqdm

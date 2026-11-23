@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PandaRAG</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%236ee7a0'/%3E%3Ctext x='16' y='23' font-family='sans-serif' font-size='19' font-weight='700' text-anchor='middle' fill='%2304150c'%3EP%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..500&family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<div id="app">
+  <header class="chrome">
+    <div class="brand">
+      <div class="mark">P</div>
+      <div>
+        <h1>Panda<b>RAG</b></h1>
+        <small>Retrieval intelligence · any domain</small>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <select id="ws-select" style="width:auto;min-width:190px;padding:8px 12px;font-size:.84rem"></select>
+    <span class="pill" id="llm-pill"><span class="dot off"></span>checking…</span>
+    <button class="ghost" id="theme-btn">◐ theme</button>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <span class="glider"></span>
+    <button data-view="ask" aria-selected="true"><i>◎</i>Ask</button>
+    <button data-view="knowledge"><i>▤</i>Knowledge</button>
+    <button data-view="graph"><i>⌬</i>Graph</button>
+    <button data-view="literature"><i>❖</i>Literature</button>
+    <button data-view="molecules"><i>⬡</i>Molecules</button>
+    <button data-view="screening"><i>⧉</i>Screening</button>
+    <button data-view="causal"><i>⇝</i>Causal</button>
+    <button data-view="repurposing"><i>⟲</i>Repurposing</button>
+    <button data-view="labs"><i>▣</i>Labs</button>
+  </nav>
+
+  <main>
+    <!-- ASK -->
+    <section class="view enter" id="view-ask">
+      <div class="grid g2">
+        <div class="card">
+          <h2 class="title">Ask your corpus</h2>
+          <p class="sub">Hybrid retrieval, graph expansion, corrective grading, grounded citations.</p>
+          <label class="field"><span>Question</span>
+            <textarea id="q" rows="3" placeholder="e.g. What mechanisms drive resistance, and how do they differ between agents?"></textarea>
+          </label>
+          <div class="chips" id="q-chips" style="margin-bottom:14px"></div>
+          <div class="row" style="justify-content:space-between">
+            <div class="toggles" id="opts"></div>
+            <button class="primary" id="ask-btn">Retrieve &amp; answer</button>
+          </div>
+          <div id="answer-wrap" style="margin-top:22px"></div>
+        </div>
+        <div class="grid" style="align-content:start">
+          <div class="card" id="metrics-card">
+            <span class="eyebrow">Self-reflection</span>
+            <div class="grid g3" style="margin-top:14px;gap:10px" id="metrics"></div>
+          </div>
+          <div class="card">
+            <span class="eyebrow">Pipeline trace</span>
+            <div class="trace" id="trace" style="margin-top:14px"><div class="empty">No run yet.</div></div>
+          </div>
+          <div class="card" id="sources-card">
+            <span class="eyebrow">Retrieved evidence</span>
+            <div id="sources" style="margin-top:14px"><div class="empty">Sources appear here.</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- KNOWLEDGE -->
+    <section class="view" id="view-knowledge" hidden>
+      <div class="grid g2">
+        <div class="card">
+          <h2 class="title">Knowledge base</h2>
+          <p class="sub">Documents in this workspace, chunked with document-level context attached.</p>
+          <div class="list" id="docs"></div>
+        </div>
+        <div class="grid" style="align-content:start">
+          <div class="card">
+            <span class="eyebrow">Add a document</span>
+            <label class="field" style="margin-top:14px"><span>Title</span><input id="d-title" placeholder="Protocol note, paper, SOP…"></label>
+            <label class="field"><span>Text</span><textarea id="d-text" rows="7" placeholder="Paste any text — clinical, legal, engineering, financial. The engine is domain-agnostic."></textarea></label>
+            <div class="row"><button class="primary" id="d-add">Ingest</button>
+              <button class="ghost" id="d-file">⬆ from file</button>
+              <input type="file" id="d-input" accept=".txt,.md,.csv,.json" hidden></div>
+          </div>
+          <div class="card">
+            <span class="eyebrow">New workspace</span>
+            <div class="row" style="margin-top:14px">
+              <input id="w-name" placeholder="Workspace name" style="flex:1;min-width:140px">
+              <input id="w-domain" placeholder="Domain" style="width:130px">
+              <button class="primary" id="w-add">Create</button>
+            </div>
+            <div class="row" style="margin-top:12px"><button class="mini danger" id="w-del">Delete current workspace</button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- GRAPH -->
+    <section class="view" id="view-graph" hidden>
+      <div class="grid g2">
+        <div class="card">
+          <h2 class="title">Entity graph</h2>
+          <p class="sub">Co-occurrence graph mined from your chunks, strongest links drawn. Hover to trace, drag to spin, click to pin.</p>
+          <svg id="gchord" viewBox="-380 -380 760 760" tabindex="0" role="application" aria-label="Entity chord diagram. Arrow keys move between entities, Escape clears."></svg>
+        </div>
+        <div class="grid" style="align-content:start">
+          <div class="card"><span class="eyebrow">Communities</span><div class="list" id="gcomm" style="margin-top:14px"></div></div>
+          <div class="card"><span class="eyebrow">Selected entity</span><div id="gsel" style="margin-top:14px"><div class="empty">Click an entity.</div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LITERATURE -->
+    <section class="view" id="view-literature" hidden>
+      <div class="card">
+        <h2 class="title">Literature intelligence</h2>
+        <p class="sub">Live PubMed and bioRxiv retrieval. Import abstracts straight into the active workspace.</p>
+        <div class="row">
+          <input id="lit-q" placeholder="e.g. EGFR inhibitor resistance" style="flex:1;min-width:220px">
+          <label class="toggle"><input type="checkbox" id="lit-pubmed" checked><i></i>PubMed</label>
+          <label class="toggle"><input type="checkbox" id="lit-biorxiv"><i></i>bioRxiv</label>
+          <select id="lit-days" style="width:150px"><option value="">Any date</option><option value="365">Past year</option><option value="1095">Past 3 years</option><option value="30">Past month</option></select>
+          <select id="lit-max" style="width:130px" title="Papers to fetch per source"><option value="15">15 papers</option><option value="50">50 papers</option><option value="100">100 papers</option><option value="200">200 papers</option></select>
+          <button class="primary" id="lit-btn">Search</button>
+        </div>
+        <div class="row" style="margin-top:14px;justify-content:space-between">
+          <span class="eyebrow" id="lit-count"></span>
+          <button class="mini" id="lit-import" hidden>⬇ Import all abstracts</button>
+        </div>
+        <div class="list" id="lit-results" style="margin-top:14px"></div>
+      </div>
+    </section>
+
+    <!-- MOLECULES -->
+    <section class="view" id="view-molecules" hidden>
+      <div class="grid g2">
+        <div class="card">
+          <h2 class="title">Molecular ADMET</h2>
+          <p class="sub">Caco-2 permeability from the trained graph neural network, with RDKit descriptors.</p>
+          <div class="row">
+            <input id="smiles" placeholder="SMILES — e.g. CC(=O)Oc1ccccc1C(=O)O" style="flex:1;min-width:230px;font-family:var(--font-mono);font-size:.88rem">
+            <button class="primary" id="mol-btn">Predict</button>
+          </div>
+          <div class="chips" id="mol-chips" style="margin-top:12px"></div>
+          <div id="mol-out" style="margin-top:20px"><div class="empty"><b>No molecule yet</b>Paste a SMILES string or pick an example.</div></div>
+        </div>
+        <div class="card" style="align-self:start">
+          <span class="eyebrow">Model card</span>
+          <div id="mol-model" style="margin-top:14px"><div class="empty">Run a prediction.</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCREENING -->
+    <section class="view" id="view-screening" hidden>
+      <div class="grid g2">
+        <div class="card">
+          <h2 class="title">Library screening</h2>
+          <p class="sub">JAX Morgan fingerprints, pairwise Tanimoto, MaxMin diverse subset — one SMILES per line.</p>
+          <label class="field"><span>Library</span>
+            <textarea id="lib" rows="7" spellcheck="false" style="font-family:var(--font-mono);font-size:.84rem"></textarea></label>
+          <div class="row" style="justify-content:space-between">
+            <div class="row" style="gap:8px">
+              <label class="field" style="margin:0"><span>Bits</span>
+                <select id="lib-bits" style="width:110px"><option>1024</option><option>2048</option><option>512</option></select></label>
+              <label class="field" style="margin:0"><span>Radius</span>
+                <select id="lib-radius" style="width:88px"><option>2</option><option>1</option><option>3</option></select></label>
+              <label class="field" style="margin:0"><span>Pick diverse</span>
+                <input id="lib-pick" value="3" style="width:88px"></label>
+            </div>
+            <button class="primary" id="lib-btn">Screen</button>
+          </div>
+          <div id="lib-out" style="margin-top:20px"><div class="empty"><b>No library screened</b>The box is pre-filled — press Screen.</div></div>
+        </div>
+        <div class="grid" style="align-content:start">
+          <div class="card"><span class="eyebrow">Similarity matrix</span>
+            <div id="lib-matrix" style="margin-top:14px"><div class="empty">Run a screen.</div></div></div>
+          <div class="card"><span class="eyebrow">Closest pairs</span>
+            <div id="lib-pairs" style="margin-top:14px"><div class="empty">Run a screen.</div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CAUSAL -->
+    <section class="view" id="view-causal" hidden>
+      <div class="grid g2">
+        <div class="card">
+          <h2 class="title">Causal path scoring</h2>
+          <p class="sub">Build a mechanistic chain; score it on evidence, depth, temporal order and source diversity.</p>
+          <div class="list" id="edges"></div>
+          <div class="row" style="margin-top:14px">
+            <button class="mini" id="edge-add">+ add hop</button>
+            <button class="primary" id="causal-btn" style="margin-left:auto">Score path</button>
+          </div>
+          <div id="causal-out" style="margin-top:20px"></div>
+        </div>
+        <div class="card" style="align-self:start">
+          <span class="eyebrow">Evidence hierarchy</span>
+          <div id="causal-schema" style="margin-top:14px"><div class="empty">Loading…</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- REPURPOSING -->
+    <section class="view" id="view-repurposing" hidden>
+      <div class="grid g2">
+        <div class="card">
+          <h2 class="title">Drug repurposing</h2>
+          <p class="sub">Link prediction over Hetionet — 47,031 nodes, trained on 528 of its 755 compound-treats-disease edges.</p>
+          <div class="row">
+            <input id="rep-drug" list="rep-drugs" placeholder="Compound — e.g. Imatinib" style="flex:1;min-width:190px">
+            <datalist id="rep-drugs"></datalist>
+            <input id="rep-disease" list="rep-diseases" placeholder="Disease (optional)" style="flex:1;min-width:170px">
+            <datalist id="rep-diseases"></datalist>
+            <button class="primary" id="rep-btn">Rank</button>
+          </div>
+          <div class="chips" id="rep-chips" style="margin-top:12px"></div>
+          <div id="rep-out" style="margin-top:20px"><div class="empty"><b>No pair scored</b>Pick a compound to rank every disease.</div></div>
+          <div id="rep-status" style="margin-top:20px"></div>
+        </div>
+        <div class="card" style="align-self:start">
+          <span class="eyebrow">Ships with the repo</span>
+          <p class="sub" style="margin:14px 0 12px">Drug-mechanism notes from <code style="font-family:var(--font-mono);font-size:.78rem">scripts/index_documents.py</code> — real text you can query today.</p>
+          <div id="rep-corpus"></div>
+          <button class="primary" id="rep-import" style="margin-top:14px">Import into workspace</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- LABS -->
+    <section class="view" id="view-labs" hidden>
+      <div class="card">
+        <h2 class="title">Labs &amp; system</h2>
+        <p class="sub">Every module is a repository in this monorepo, loaded live. State reflects this machine.</p>
+        <div class="grid g3" id="labs" style="margin-top:4px"></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <span class="eyebrow">Retrieval stack</span>
+        <div class="grid g3" style="margin-top:14px" id="stack"></div>
+      </div>
+    </section>
+  </main>
+</div>
+<script type="module" src="/assets/app.js"></script>
+</body>
+</html>
