@@ -1,6 +1,6 @@
-"""Lab modules: thin wrappers over the six repos in this monorepo.
+"""Lab modules: thin wrappers over the six research projects bundled in projects/.
 
-Each wrapper loads repo modules by file path (the repos aren't installed packages and
+Each wrapper loads project modules by file path (the projects aren't installed packages and
 some have heavy optional imports in their __init__), and reports status so the UI can
 show what is live vs. unavailable on this machine.
 """
@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1] / "projects"
 REPOS = {
     "admet": ROOT / "ADMET-Prediction-System-Graph-Neural-Networks-with-RAG",
     "repurposing": ROOT / "Drug-Repurposing-Intelligence-System",
@@ -266,8 +266,8 @@ def repurposing_status():
     if not graph_files:
         missing.append({"what": "Hetionet graph", "fix": "python scripts/download_data.py", "note": url or "hetio/hetionet v1.0"})
     if not ckpts:
-        missing.append({"what": "trained R-GCN weights", "fix": "python scripts/train_model.py", "note": "DistMult decoder, 100 epochs"})
-    return {"repo": r.name, "architecture": "R-GCN encoder (3 layers, 128d, 30 bases) + DistMult decoder",
+        missing.append({"what": "trained R-GCN weights", "fix": "python scripts/train_ranking.py", "note": "listwise ranking loss, 150 epochs"})
+    return {"repo": r.name, "architecture": "R-GCN encoder (3 layers, 128d, 30 bases) + MLP decoder",
             "deps_ok": importlib.util.find_spec("torch_geometric") is not None,
             "missing": missing, "checkpoints": ckpts, "data_files": len(graph_files)}
 
@@ -536,8 +536,4 @@ def status():
         except Exception as e:
             state = f"unavailable: {type(e).__name__}"
         out.append({"name": name, "repo": REPOS[key].name, "description": desc, "state": state})
-    missing = [m for m in ("tensorflow",) if importlib.util.find_spec(m) is None]
-    out.append({"name": "Variant effects", "repo": REPOS["oncomolml"].name,
-                "description": "TensorFlow variant-effect / sequence models",
-                "state": "live" if not missing else "needs: " + ", ".join(missing)})
     return out

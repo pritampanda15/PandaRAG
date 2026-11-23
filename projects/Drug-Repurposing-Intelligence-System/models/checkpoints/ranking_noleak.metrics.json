@@ -1,0 +1,31 @@
+{
+  "objective": "listwise ranking, per-drug negatives",
+  "encoder": "rgcn",
+  "message_graph": "treats edges removed",
+  "negatives_per_positive": 32,
+  "epochs": 150,
+  "best_epoch": 130,
+  "learning_rate": 0.01,
+  "parameters": 7581409,
+  "train_pairs": 528,
+  "test_pairs": 114,
+  "diseases": 137,
+  "held_out_ranking": {
+    "pairs": 114,
+    "model": {
+      "median_rank": 3.5,
+      "mean_rank": 10.6,
+      "hits_at_1": 0.36,
+      "hits_at_10": 0.737,
+      "mrr": 0.479
+    },
+    "popularity_control": {
+      "median_rank": 13.0,
+      "mean_rank": 16.8,
+      "hits_at_1": 0.096,
+      "hits_at_10": 0.447,
+      "mrr": 0.22
+    },
+    "beats_popularity": true
+  }
+}

@@ -19,3 +19,4 @@ biopython
 # jax
 # pandas
 # tqdm
+# pyyaml

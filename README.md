@@ -1,27 +1,19 @@
 # PandaRAG
 
 A domain-agnostic RAG engine with a tab per capability, plus live wrappers around six
-research projects' working models.
+bundled research projects' working models.
 
 ```bash
 sh run.sh      # http://localhost:8787
 ```
 
-Requires Python 3.10+. Install with `pip install -r requirements.txt`. That covers Ask, Knowledge
-and Graph; the commented extras in that file enable the rest.
+Requires Python 3.10+. Install with `pip install -r requirements.txt`. That covers Ask, Knowledge,
+Graph, Literature and Causal; uncomment the extras in that file for the rest.
 
-Every lab reads a sibling project, so clone these **beside this repo**, all under
-`github.com/pritampanda15`:
-
-```
-ADMET-Prediction-System-Graph-Neural-Networks-with-RAG   Drug-Repurposing-Intelligence-System
-Literature-Intelligence                                  OncoMolML
-Oncology-Drug-Response-Prediction-System_DL-RAG          TC-DrugRAG
-```
-
-A missing project only turns its own lab off; Ask, Knowledge and Graph never need one. The "live"
-states below describe the author's machine. Datasets and trained checkpoints for Repurposing are
-not included, and its R-GCN fixes and `train_ranking.py` are not yet published in that project.
+The parts of the six research projects that PandaRAG uses are bundled in `projects/`, including
+the trained ADMET checkpoint, so nothing else needs cloning. Two things are not bundled: Hetionet
+(714 MB of JSON once unpacked) and the trained R-GCN checkpoint, which Repurposing needs; see the rebuild steps below. Variant
+effects is not included. The "live" states below describe the author's machine.
 
 Optional environment:
 
@@ -85,7 +77,7 @@ topics into separate workspaces, or make the index incremental and move the stor
 | Causal KG | `TC-DrugRAG` | live (schemas + path scorer) |
 | Oncology KB | `Oncology-Drug-Response-…_DL-RAG` | live (seed corpus) |
 | Repurposing | `Drug-Repurposing-Intelligence-System` | live (Hetionet 47,031 nodes · trained checkpoint) |
-| Variant effects | `OncoMolML` | needs `tensorflow` |
+| Variant effects | `OncoMolML` | not bundled |
 
 Screening needs `jax` (`pip install "jax[cpu]"`). `pykeen` is in the repurposing repo's
 pinned requirements but is imported nowhere in its source.
@@ -118,10 +110,11 @@ train and test, so this does not measure performance on compounds with no known 
 0.872) kept held-out treats edges in the message-passing graph. With val/test edges removed at
 inference, `ranking_model.pt` falls to MRR 0.208. The app no longer loads either file.
 
-To rebuild from scratch, inside `Drug-Repurposing-Intelligence-System`:
+To build it, inside `projects/Drug-Repurposing-Intelligence-System` (training takes about 15
+minutes on an Apple laptop CPU):
 
 ```bash
-python3 scripts/download_data.py && python3 scripts/build_knowledge_graph.py
+python3 scripts/download_data.py
 ```
 
 ```bash
@@ -143,6 +136,7 @@ archival plate line-art at the margins. A sepia-dark variant lives behind the th
 
 ```
 backend/   app.py (API) · rag.py (engine) · labs.py (repo wrappers) · llm.py · test_rag.py
+projects/  the six research projects' modules the labs load
 frontend/  index.html · app.css · app.js       # no build step
 data/      store.json                          # workspaces, written atomically (gitignored)
 ```
