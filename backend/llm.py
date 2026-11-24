@@ -16,10 +16,49 @@ DEFAULT_MODELS = {
 }
 
 _anthropic_client = None
+_override = None  # optional runtime config set from the UI (in-memory only)
+
+
+def configure(provider: str | None, model: str = "", api_key: str = "", base_url: str = "") -> dict:
+    """Set or clear an in-memory runtime LLM provider override."""
+    global _override, _anthropic_client
+    _anthropic_client = None
+    prov = (provider or "").strip().lower()
+    if not prov or prov in ("none", "extractive", "off"):
+        _override = None
+        return info()
+    if prov not in ("anthropic", "openai", "ollama", "gemini"):
+        raise ValueError(f"unsupported provider: {prov}")
+    m = (model or "").strip() or DEFAULT_MODELS[prov]
+    b = (base_url or "").strip().rstrip("/")
+    if prov == "ollama":
+        b = b or "http://localhost:11434/v1"
+        if not b.endswith("/v1"):
+            b += "/v1"
+        k = (api_key or "").strip() or "ollama"
+    elif prov == "openai":
+        b = b or "https://api.openai.com/v1"
+        k = (api_key or "").strip() or ("local" if "api.openai.com" not in b else "")
+        if not k:
+            raise ValueError("OpenAI API key is required for api.openai.com")
+    elif prov == "gemini":
+        b = "https://generativelanguage.googleapis.com/v1beta"
+        k = (api_key or "").strip()
+        if not k:
+            raise ValueError("Gemini API key is required")
+    else:  # anthropic
+        b = "https://api.anthropic.com"
+        k = (api_key or "").strip()
+        if not k:
+            raise ValueError("Anthropic API key is required")
+    _override = (prov, m, b, k)
+    return info()
 
 
 def _detect():
-    """Return (provider, model, base_url, api_key) from environment."""
+    """Return (provider, model, base_url, api_key) from runtime override or environment."""
+    if _override is not None:
+        return _override
     explicit = (os.getenv("PANDARAG_PROVIDER") or "").strip().lower()
     env_model = (os.getenv("PANDARAG_MODEL") or "").strip()
 

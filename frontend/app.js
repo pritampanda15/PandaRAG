@@ -120,7 +120,34 @@ function renderChatHistory() {
 }
 $("#chat-clear").onclick = () => { state.history = []; renderChatHistory(); toast("Conversation thread cleared"); };
 
-const cited = (text) => esc(text).replace(/\[(\d+)\]/g, (_, n) => `<cite data-ref="${n}">${n}</cite>`);
+const citedInline = (text) => esc(text)
+  .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+  .replace(/`([^`]+)`/g, "<code>$1</code>")
+  .replace(/\[(\d+)\]/g, (_, n) => `<cite data-ref="${n}">${n}</cite>`);
+
+function cited(text) {
+  const lines = String(text ?? "").split("\n");
+  let html = "", inList = false;
+  const closeList = () => { if (inList) { html += "</ul>"; inList = false; } };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { closeList(); continue; }
+    const bullet = line.match(/^[-*•]\s+(.+)$/);
+    const heading = line.match(/^#{1,4}\s+(.+)$/);
+    if (bullet) {
+      if (!inList) { html += "<ul>"; inList = true; }
+      html += `<li>${citedInline(bullet[1])}</li>`;
+    } else if (heading) {
+      closeList();
+      html += `<h4>${citedInline(heading[1])}</h4>`;
+    } else {
+      closeList();
+      html += `<p>${citedInline(line)}</p>`;
+    }
+  }
+  closeList();
+  return html || `<p>${citedInline(text)}</p>`;
+}
 
 function formatMarkdown(q, res) {
   const refs = (res.sources || []).map((s, i) => `[${i + 1}] **${s.title}** (${s.source}, grade ${s.grade}): ${s.text}`).join("\n");
@@ -149,11 +176,13 @@ function renderAnswer(res, queryText = "") {
   wrap.innerHTML = `${cragBanner}
     <div class="row" style="justify-content:space-between;margin-bottom:12px">
       <div class="row" style="gap:6px"><span class="tag info">${esc(res.mode)}</span>
+        ${res.mode.startsWith("extractive") ? '<button class="mini" id="connect-llm-inline">⚡ connect LLM</button>' : ""}
         <button class="mini" id="copy-md-btn">copy markdown</button>
         ${res.sources.length ? '<button class="mini" id="to-causal-btn">⇝ draft causal chain</button>' : ""}</div>
       <span class="eyebrow">${res.total_ms} ms · ${res.sources.length} passages</span></div>
     <div class="answer">${body}</div>`;
 
+  $("#connect-llm-inline")?.addEventListener("click", () => openLlmModal());
   $("#crag-pubmed-btn")?.addEventListener("click", () => fetchPubMedAndReask(state.lastRun.query).catch((e) => toast(e.message, true)));
   $("#copy-md-btn")?.addEventListener("click", async () => {
     await navigator.clipboard.writeText(formatMarkdown(state.lastRun.query, res));
@@ -875,17 +904,65 @@ onShow.causal = async () => {
   }
 };
 
-/* ---------------- health ---------------- */
+/* ---------------- health & LLM config modal ---------------- */
+const LLM_DEFAULTS = {
+  openai: { model: "gpt-4o-mini", base: "https://api.openai.com/v1", needKey: true, showBase: true },
+  gemini: { model: "gemini-2.5-flash", base: "", needKey: true, showBase: false },
+  anthropic: { model: "claude-sonnet-4-5-20250929", base: "", needKey: true, showBase: false },
+  ollama: { model: "llama3.2", base: "http://localhost:11434/v1", needKey: false, showBase: true },
+  extractive: { model: "", base: "", needKey: false, showBase: false },
+};
+function syncLlmModalFields() {
+  const p = $("#llm-provider").value, d = LLM_DEFAULTS[p];
+  $("#llm-model-wrap").hidden = p === "extractive";
+  $("#llm-key-wrap").hidden = !d.needKey;
+  $("#llm-base-wrap").hidden = !d.showBase;
+  $("#llm-model").placeholder = d.model || "";
+  if (d.showBase && !$("#llm-base").value) $("#llm-base").value = d.base;
+  if (p === "ollama") $("#llm-base").value = d.base;
+}
+function openLlmModal() {
+  syncLlmModalFields();
+  $("#llm-modal").hidden = false;
+  setTimeout(() => ($("#llm-key-wrap").hidden ? $("#llm-model") : $("#llm-key")).focus(), 30);
+}
+function closeLlmModal() { $("#llm-modal").hidden = true; }
+$("#llm-pill").onclick = openLlmModal;
+$("#llm-close").onclick = $("#llm-cancel").onclick = closeLlmModal;
+$("#llm-modal").addEventListener("click", (e) => { if (e.target === $("#llm-modal")) closeLlmModal(); });
+$("#llm-provider").onchange = () => { $("#llm-model").value = ""; $("#llm-base").value = ""; syncLlmModalFields(); };
+$("#llm-save").onclick = async () => {
+  const provider = $("#llm-provider").value;
+  const btn = $("#llm-save"); btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const r = await api("/llm/config", {
+      body: {
+        provider,
+        model: $("#llm-model").value.trim(),
+        api_key: $("#llm-key").value.trim(),
+        base_url: $("#llm-base").value.trim(),
+      },
+    });
+    $("#llm-key").value = "";
+    closeLlmModal();
+    await health();
+    toast(r.available ? `Connected: ${r.provider} · ${r.model}` : "Switched to extractive mode");
+  } catch (e) {
+    toast(e.message, true);
+  } finally { btn.disabled = false; btn.textContent = "Connect"; }
+};
+
 async function health() {
   try {
     const h = await api("/health");
     if (h.plugins === "core" && localStorage.getItem("pandarag-bio") == null) setBioLabs(false);
+    if (h.provider && LLM_DEFAULTS[h.provider]) $("#llm-provider").value = h.provider;
     $("#llm-pill").innerHTML = h.llm
-      ? `<span class="dot"></span>${esc(h.provider)} · ${esc(h.model)}`
-      : '<span class="dot off"></span>extractive mode';
+      ? `<span class="dot"></span>${esc(h.provider)} · ${esc(h.model)} ▾`
+      : '<span class="dot off"></span>extractive · connect LLM ▾';
     $("#llm-pill").title = h.llm
-      ? `Provider: ${h.provider} (${h.model}) · Embedder: ${h.embedder}`
-      : `Set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL (Ollama), or GEMINI_API_KEY · Embedder: ${h.embedder}`;
+      ? `Click to switch LLM · Embedder: ${h.embedder}`
+      : `Click to connect OpenAI, Gemini, Claude, or Ollama · Embedder: ${h.embedder}`;
   } catch (e) { $("#llm-pill").innerHTML = '<span class="dot off"></span>api offline'; }
 }
 

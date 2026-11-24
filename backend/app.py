@@ -213,6 +213,13 @@ class PathIn(BaseModel):
     edges: list[dict]
 
 
+class LLMConfigIn(BaseModel):
+    provider: str = "extractive"
+    model: str = ""
+    api_key: str = ""
+    base_url: str = ""
+
+
 @app.get("/api/health")
 def health():
     li = llm.info()
@@ -222,11 +229,20 @@ def health():
         "llm": li["available"],
         "provider": li["provider"],
         "model": li["model"],
+        "base_url": li["base_url"],
         "embedder": embed_name or "LSA-256 (local)",
         "plugins": os.getenv("PANDARAG_PLUGINS", "bio").strip().lower(),
         "labs": labs.status(),
         "workspaces": [w.summary() for w in store.ws.values()],
     }
+
+
+@app.post("/api/llm/config")
+def set_llm_config(body: LLMConfigIn):
+    try:
+        return llm.configure(body.provider, body.model, body.api_key, body.base_url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/workspaces")

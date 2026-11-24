@@ -47,7 +47,20 @@ NEGATIONS = {
 ABSTENTION_RE = re.compile(
     r"\b(?:do not cover|don't cover|does not cover|doesn't cover|not mentioned|not covered|"
     r"not stated|no grounded evidence|insufficient evidence|not provided|cannot determine|"
-    r"not specified|passages do not|context does not)\b",
+    r"not specified|passages do not|context does not|do not directly report)\b",
+    re.I,
+)
+
+BOILERPLATE_RE = re.compile(
+    r"^(?:this study (?:was )?(?:aimed|designed)|(?:the )?(?:aim|objective|purpose) of this|"
+    r"we (?:included|searched|conducted|performed|evaluated|investigated|retrospectively|prospectively)|"
+    r"(?:background|methods?|objectives?|purpose)\s*:|to (?:investigate|evaluate|assess|compare|determine) the\b)",
+    re.I,
+)
+EVIDENCE_CUE_RE = re.compile(
+    r"(?:\b(?:ec50|ed50|ic50|ki|kd|potency|more potent|less potent|fold|ratio|significantly|"
+    r"higher|lower|increased|decreased|reduced|inhibited|activates?|drives?|causes?|mechanism|"
+    r"mg/kg|mcg/kg|µg|ug/ml|nmol|mmhg|p\s*[<≤=]\s*0?\.\d|95%\s*ci|or\s*=|smd\s*=|hr\s*=|\d+(?:\.\d+)?%)\b)",
     re.I,
 )
 
@@ -743,9 +756,11 @@ class Workspace:
                 ans = ""
                 for piece in llm.stream(
                     f"Context passages:\n{ctx}\n\nQuestion: {q}\n\n"
-                    "Answer using only the passages. Cite every claim with [n]. "
-                    "If the passages don't cover something, say so plainly.",
-                    system=f"You are PandaRAG, a precise research assistant for the {self.domain} domain.",
+                    "Write a crisp, direct answer using ONLY the passages above:\n"
+                    "1. Start with a 1–2 sentence bottom-line answer (if a specific metric asked for isn't reported in the passages, say so plainly upfront).\n"
+                    "2. Follow with 2–4 concise bullet points (- ...) highlighting key quantitative findings, comparisons, or mechanisms, bolding key terms (**term**).\n"
+                    "3. Cite every claim inline with [n]. Do not copy abstract background/methods boilerplate.",
+                    system=f"You are PandaRAG, a crisp, high-signal scientific research assistant for the {self.domain} domain.",
                     history=history,
                 ):
                     ans += piece
@@ -766,28 +781,42 @@ class Workspace:
             "mode": mode, "total_ms": int((time.time() - t0) * 1000),
         }}
 
-    def _extractive(self, q, hits, n=4):
+    def _extractive(self, q, hits, n=3):
         qtok = set(tokens(q))
+        all_hit_toks = set().union(*(set(tokens(h["text"] + " " + h["title"])) for h in hits)) if hits else set()
+        missing = [t for t in tokens(q) if t not in all_hit_toks and len(t) > 3]
+
         scored, fallback = [], []
         for i, h in enumerate(hits):
             for s in sentences(h["text"]):
                 st = set(tokens(s))
-                score = len(qtok & st) / (len(qtok) or 1) + 0.15 * h["grade"] - 0.01 * i
+                overlap = len(qtok & st) / (len(qtok) or 1)
+                cue_bonus = 0.22 if EVIDENCE_CUE_RE.search(s) else 0.0
+                boiler_pen = -0.45 if BOILERPLATE_RE.search(s.strip()) else 0.0
+                # Prefer crisp, information-dense sentences over bloated 60+ word abstract runs.
+                wlen = len(s.split())
+                len_pen = -0.10 if wlen > 55 else 0.0
+                score = overlap + cue_bonus + boiler_pen + len_pen + 0.15 * h["grade"] - 0.015 * i
                 if len(st) >= 4:
-                    scored.append((score, s, i + 1))
+                    scored.append((score, s.strip(), i + 1))
                 elif s.strip():
                     fallback.append((score, s.strip(), i + 1))
+
         pool = scored or fallback
         seen, out = set(), []
         for _, s, ref in sorted(pool, reverse=True):
             if s not in seen:
                 seen.add(s)
-                out.append(f"{s} [{ref}]")
+                out.append(f"- {s} [{ref}]")
             if len(out) == n:
                 break
         if not out and hits:
-            out.append(f"{hits[0]['text'][:300].strip()} [1]")
-        return " ".join(out)
+            out.append(f"- {hits[0]['text'][:300].strip()} [1]")
+        prefix = ""
+        if missing:
+            terms = ", ".join(dict.fromkeys(missing[:3]))
+            prefix = f"The retrieved passages do not directly report **{terms}**. Closest grounded findings:\n"
+        return prefix + "\n".join(out)
 
     def _reflect(self, q, ans, hits):
         if not hits or not ans.strip():

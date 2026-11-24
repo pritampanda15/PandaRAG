@@ -22,7 +22,7 @@
     </div>
     <div class="spacer"></div>
     <select id="ws-select" style="width:auto;min-width:190px;padding:8px 12px;font-size:.84rem"></select>
-    <span class="pill" id="llm-pill"><span class="dot off"></span>checking…</span>
+    <button class="pill" id="llm-pill" type="button" title="Configure LLM provider for crisp generative answers"><span class="dot off"></span>checking…</button>
     <button class="ghost active" id="bio-btn" title="Show or hide biomedical research tabs">⬡ bio labs</button>
     <button class="ghost" id="theme-btn">◐ theme</button>
   </header>
@@ -203,6 +203,39 @@
     </section>
   </main>
 </div>
+
+<div class="modal-backdrop" id="llm-modal" hidden>
+  <div class="card modal" role="dialog" aria-modal="true" aria-labelledby="llm-modal-title">
+    <div class="row" style="justify-content:space-between;margin-bottom:8px">
+      <h2 class="title" id="llm-modal-title" style="margin:0">LLM Provider</h2>
+      <button class="mini" id="llm-close" type="button">✕</button>
+    </div>
+    <p class="sub" style="margin-bottom:16px">Connect any LLM for crisp, synthesized answers with citations (stored in memory for this session only).</p>
+    <label class="field"><span>Provider</span>
+      <select id="llm-provider">
+        <option value="openai">OpenAI / OpenAI-compatible</option>
+        <option value="gemini">Google Gemini</option>
+        <option value="anthropic">Anthropic Claude</option>
+        <option value="ollama">Ollama (local · free)</option>
+        <option value="extractive">Extractive only (offline · no LLM)</option>
+      </select>
+    </label>
+    <label class="field" id="llm-model-wrap"><span>Model</span>
+      <input id="llm-model" placeholder="e.g. gpt-4o-mini, gemini-2.5-flash, claude-sonnet-4-5-20250929, llama3.2">
+    </label>
+    <label class="field" id="llm-key-wrap"><span>API Key</span>
+      <input id="llm-key" type="password" autocomplete="off" placeholder="sk-… / AIza… / sk-ant-…">
+    </label>
+    <label class="field" id="llm-base-wrap" hidden><span>Base URL</span>
+      <input id="llm-base" placeholder="http://localhost:11434/v1">
+    </label>
+    <div class="row" style="justify-content:flex-end;margin-top:16px">
+      <button class="ghost" id="llm-cancel" type="button">Cancel</button>
+      <button class="primary" id="llm-save" type="button">Connect</button>
+    </div>
+  </div>
+</div>
+
 <script type="module" src="/assets/app.js"></script>
 </body>
 </html>

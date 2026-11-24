@@ -273,10 +273,11 @@ with tempfile.TemporaryDirectory() as tmp:
         cached = st2.disk_cache.get_many(w1.embedder.name, [rag.text_hash(f"{w1.chunks[0]['ctx']} {w1.chunks[0]['text']}")])
         assert len(cached) == 1, "vector was not persisted to SQLite cache"
 
-# 11. Multi-provider LLM auto-detection
+# 11. Multi-provider LLM auto-detection & runtime configure()
 env_keys = ("PANDARAG_PROVIDER", "PANDARAG_MODEL", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OLLAMA_MODEL", "GEMINI_API_KEY", "GOOGLE_API_KEY")
 saved_env = {k: os.environ.pop(k, None) for k in env_keys}
 try:
+    rag.llm.configure("extractive")
     assert not rag.llm.available()
     os.environ["OLLAMA_MODEL"] = "llama3.2"
     assert rag.llm.available() and rag.llm.info()["provider"] == "ollama" and rag.llm.info()["model"] == "llama3.2"
@@ -286,12 +287,34 @@ try:
     os.environ.pop("GEMINI_API_KEY")
     os.environ["OPENAI_BASE_URL"] = "http://localhost:8000/v1"
     assert rag.llm.available() and rag.llm.info()["provider"] == "openai"
+    os.environ.pop("OPENAI_BASE_URL")
+    # Runtime override via UI endpoint
+    cfg = rag.llm.configure("gemini", "gemini-2.5-flash", "test-runtime-key")
+    assert cfg["available"] and cfg["provider"] == "gemini" and cfg["model"] == "gemini-2.5-flash"
+    cfg_off = rag.llm.configure("extractive")
+    assert not cfg_off["available"]
 finally:
+    rag.llm.configure("extractive")
     for k in env_keys:
         os.environ.pop(k, None)
     for k, v in saved_env.items():
         if v is not None:
             os.environ[k] = v
+
+# 11b. Extractive synthesis demotes abstract boilerplate & flags missing requested terms
+ext_ws = rag.Workspace("ext", "Biomedical")
+ext_hits = [{
+    "title": "Propofol-Etomidate",
+    "grade": 0.7,
+    "text": (
+        "This study was aimed to investigate the physical stability of propofol and etomidate. "
+        "We included randomized controlled trials comparing propofol and etomidate. "
+        "Compared to propofol alone, the combination significantly reduced apnea (OR = 0.16, P < 0.001) and improved MAP."
+    ),
+}]
+ext_ans = ext_ws._extractive("What is propofol and etomidate potency?", ext_hits, n=2)
+assert "do not directly report **potency**" in ext_ans, ext_ans
+assert ext_ans.splitlines()[1].startswith("- Compared to propofol alone"), ext_ans
 
 # 12. FastAPI endpoint smoke tests (compare, causal-extract, SSRF URL block)
 import app as api_app
