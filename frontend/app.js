@@ -875,17 +875,7 @@ onShow.causal = async () => {
   }
 };
 
-/* ---------------- LABS / health ---------------- */
-const STACK = [
-  ["Contextual chunking", "Each chunk is indexed with its document title and lead sentence, so retrieval keeps the surrounding context."],
-  ["Query planning", "Decomposition into sub-queries plus HyDE — a hypothetical answer used as an extra dense probe."],
-  ["Hybrid + RRF", "BM25 lexical and dense vector lists fused with reciprocal rank fusion across every sub-query."],
-  ["GraphRAG expansion", "Entity co-occurrence graph: query entities and their strongest neighbours boost their chunks."],
-  ["MMR rerank", "Maximal marginal relevance trades relevance against redundancy so passages do not repeat each other."],
-  ["Corrective RAG", "Every passage is graded relevant / ambiguous / irrelevant; irrelevant ones are dropped before generation."],
-  ["Grounded generation", "Claude, OpenAI, Gemini, or local Ollama answer with inline citations; extractive fallback needs no key."],
-  ["Self-reflection", "Polarity-aware & semantic faithfulness, answer relevance and rank-aware context precision per run."],
-];
+/* ---------------- health ---------------- */
 async function health() {
   try {
     const h = await api("/health");
@@ -896,18 +886,8 @@ async function health() {
     $("#llm-pill").title = h.llm
       ? `Provider: ${h.provider} (${h.model}) · Embedder: ${h.embedder}`
       : `Set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL (Ollama), or GEMINI_API_KEY · Embedder: ${h.embedder}`;
-    $("#labs").innerHTML = h.labs.map((l) => {
-      const live = l.state === "live";
-      return `<div class="stat"><div class="row" style="justify-content:space-between">
-          <span class="k">${esc(l.name)}</span><span class="tag ${live ? "ok" : "warn"}">${esc(l.state)}</span></div>
-        <div class="v" style="font-size:.95rem;line-height:1.4">${esc(l.description)}</div>
-        <code style="display:block;margin-top:10px;font:500 .68rem/1.4 var(--font-mono);color:var(--text-3)">${esc(l.repo)}</code></div>`;
-    }).join("");
   } catch (e) { $("#llm-pill").innerHTML = '<span class="dot off"></span>api offline'; }
 }
-$("#stack").innerHTML = STACK.map(([k, v], i) =>
-  `<div class="stat"><div class="k">${String(i + 1).padStart(2, "0")} · ${esc(k)}</div>
-    <div style="margin-top:9px;font-size:.84rem;color:var(--text-2);line-height:1.55">${esc(v)}</div></div>`).join("");
 
 /* ---------------- boot ---------------- */
 (async () => {

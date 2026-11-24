@@ -29,13 +29,12 @@
 
   <nav class="tabs" id="tabs">
     <span class="glider"></span>
-    <button data-view="ask" aria-selected="true"><i>◎</i>Ask</button>
+    <button class="bio-tab" data-view="literature"><i>❖</i>Literature</button>
+    <button data-view="ask" aria-selected="true"><i>◎</i>Retrieval</button>
     <button data-view="knowledge"><i>▤</i>Knowledge</button>
     <button data-view="graph"><i>⌬</i>Graph</button>
-    <button class="bio-tab" data-view="literature"><i>❖</i>Literature</button>
     <button class="bio-tab" data-view="causal"><i>⇝</i>Causal</button>
     <button class="bio-tab" data-view="repurposing"><i>⟲</i>Repurposing</button>
-    <button class="bio-tab" data-view="labs"><i>▣</i>Labs</button>
   </nav>
 
   <main>
@@ -200,19 +199,6 @@
           <div id="rep-corpus"></div>
           <button class="primary" id="rep-import" style="margin-top:14px">Import into workspace</button>
         </div>
-      </div>
-    </section>
-
-    <!-- LABS -->
-    <section class="view" id="view-labs" hidden>
-      <div class="card">
-        <h2 class="title">Labs &amp; system</h2>
-        <p class="sub">Every module is a repository in this monorepo, loaded live. State reflects this machine.</p>
-        <div class="grid g3" id="labs" style="margin-top:4px"></div>
-      </div>
-      <div class="card" style="margin-top:16px">
-        <span class="eyebrow">Retrieval stack</span>
-        <div class="grid g3" style="margin-top:14px" id="stack"></div>
       </div>
     </section>
   </main>

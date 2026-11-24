@@ -20,7 +20,7 @@
 
 **A glass-box RAG engine & scientific research workbench** — every retrieval stage is toggleable, traced with millisecond timings, benchmarked on BEIR, and wired directly into live PubMed/bioRxiv search, causal path scoring, and Hetionet drug repurposing.
 
-Use it in **Full Bio Workbench** mode (all 7 tabs) or flip the **Core RAG / Bio Labs** switch in the header (or `PANDARAG_PLUGINS=core`) for a clean, domain-agnostic 3-tab RAG engine (**Ask · Knowledge · Graph**).
+Use it in **Full Bio Workbench** mode (all 6 tabs: **Literature · Retrieval · Knowledge · Graph · Causal · Repurposing**) or flip the **Core RAG / Bio Labs** switch in the header (or `PANDARAG_PLUGINS=core`) for a clean, domain-agnostic 3-tab RAG engine (**Retrieval · Knowledge · Graph**).
 
 ```bash
 pip install -r requirements.txt
@@ -65,15 +65,14 @@ flowchart LR
 ## Key Capabilities
 
 ### Glass-Box RAG Engine (Core Tabs)
-- **Ask** — Multi-turn RAG with clickable inline `[n]` citations, live per-stage latency trace, **A/B Ablation Compare** (Baseline Hybrid vs. active toggles side-by-side), **CRAG PubMed fallback**, **Copy Markdown + References**, and **→ Draft Causal Chain** extraction.
+- **Retrieval** — Multi-turn RAG with clickable inline `[n]` citations, live per-stage latency trace, **A/B Ablation Compare** (Baseline Hybrid vs. active toggles side-by-side), **CRAG PubMed fallback**, **Copy Markdown + References**, and **→ Draft Causal Chain** extraction.
 - **Knowledge** — SQLite-persisted workspaces (`data/pandarag.db`, auto-migrating legacy `store.json`) with SHA-256 deduplication, persistent neural vector caching across restarts, **drag-and-drop batch PDF/file upload** (up to 50 MB per PDF with running-header removal), and **URL / DOI fetching** (`POST /api/url`).
 - **Graph** — Interactive, spinnable SVG chord diagram of entity co-occurrences and modularity communities; biomedical suffix heuristics activate only for biomedical workspaces so general workspaces stay clean.
 
-### Connected Biomedical Research Labs (`⬡ bio labs` toggle)
-- **Literature** — Live PubMed + bioRxiv search, deduplicated one-click workspace import, and direct handoff to Ask.
+### Connected Biomedical Research Tabs (`⬡ bio labs` toggle)
+- **Literature** — Live PubMed + bioRxiv search, deduplicated one-click workspace import (auto-creates a workspace if none exists), and direct handoff to Retrieval.
 - **Causal** — Mechanistic causal chain editor & scorer (`TC-DrugRAG`), pre-fillable directly from any RAG answer.
 - **Repurposing** — R-GCN link prediction over Hetionet (47,031 nodes, 2.25M edges) with an honest model card and per-row **"Evidence →"** buttons that launch RAG + PubMed verification for any candidate compound-disease pair.
-- **Labs** — Live system status across all four bundled research modules and active retrieval/LLM stack.
 
 ---
 
