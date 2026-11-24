@@ -33,8 +33,6 @@
     <button data-view="knowledge"><i>▤</i>Knowledge</button>
     <button data-view="graph"><i>⌬</i>Graph</button>
     <button class="bio-tab" data-view="literature"><i>❖</i>Literature</button>
-    <button class="bio-tab" data-view="molecules"><i>⬡</i>Molecules</button>
-    <button class="bio-tab" data-view="screening"><i>⧉</i>Screening</button>
     <button class="bio-tab" data-view="causal"><i>⇝</i>Causal</button>
     <button class="bio-tab" data-view="repurposing"><i>⟲</i>Repurposing</button>
     <button class="bio-tab" data-view="labs"><i>▣</i>Labs</button>
@@ -156,56 +154,6 @@
           </div>
         </div>
         <div class="list" id="lit-results" style="margin-top:14px"></div>
-      </div>
-    </section>
-
-    <!-- MOLECULES -->
-    <section class="view" id="view-molecules" hidden>
-      <div class="grid g2">
-        <div class="card">
-          <h2 class="title">Molecular ADMET</h2>
-          <p class="sub">Caco-2 permeability from the trained graph neural network, with RDKit descriptors.</p>
-          <div class="row">
-            <input id="smiles" placeholder="SMILES — e.g. CC(=O)Oc1ccccc1C(=O)O" style="flex:1;min-width:230px;font-family:var(--font-mono);font-size:.88rem">
-            <button class="primary" id="mol-btn">Predict</button>
-          </div>
-          <div class="chips" id="mol-chips" style="margin-top:12px"></div>
-          <div id="mol-out" style="margin-top:20px"><div class="empty"><b>No molecule yet</b>Paste a SMILES string or pick an example.</div></div>
-        </div>
-        <div class="card" style="align-self:start">
-          <span class="eyebrow">Model card</span>
-          <div id="mol-model" style="margin-top:14px"><div class="empty">Run a prediction.</div></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- SCREENING -->
-    <section class="view" id="view-screening" hidden>
-      <div class="grid g2">
-        <div class="card">
-          <h2 class="title">Library screening</h2>
-          <p class="sub">JAX Morgan fingerprints, pairwise Tanimoto, MaxMin diverse subset — one SMILES per line.</p>
-          <label class="field"><span>Library</span>
-            <textarea id="lib" rows="7" spellcheck="false" style="font-family:var(--font-mono);font-size:.84rem"></textarea></label>
-          <div class="row" style="justify-content:space-between">
-            <div class="row" style="gap:8px">
-              <label class="field" style="margin:0"><span>Bits</span>
-                <select id="lib-bits" style="width:110px"><option>1024</option><option>2048</option><option>512</option></select></label>
-              <label class="field" style="margin:0"><span>Radius</span>
-                <select id="lib-radius" style="width:88px"><option>2</option><option>1</option><option>3</option></select></label>
-              <label class="field" style="margin:0"><span>Pick diverse</span>
-                <input id="lib-pick" value="3" style="width:88px"></label>
-            </div>
-            <button class="primary" id="lib-btn">Screen</button>
-          </div>
-          <div id="lib-out" style="margin-top:20px"><div class="empty"><b>No library screened</b>The box is pre-filled — press Screen.</div></div>
-        </div>
-        <div class="grid" style="align-content:start">
-          <div class="card"><span class="eyebrow">Similarity matrix</span>
-            <div id="lib-matrix" style="margin-top:14px"><div class="empty">Run a screen.</div></div></div>
-          <div class="card"><span class="eyebrow">Closest pairs</span>
-            <div id="lib-pairs" style="margin-top:14px"><div class="empty">Run a screen.</div></div></div>
-        </div>
       </div>
     </section>
 

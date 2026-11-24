@@ -173,15 +173,6 @@ with tempfile.TemporaryDirectory() as tmp:
     mod.write_text("value = 12345")
     assert labs.load_submodule("pr_test", mod, []).value == 12345
 
-sc = labs.screen(["CC(=O)Oc1ccccc1C(=O)O", "CC(C)Cc1ccc(C(C)C(=O)O)cc1", "Cn1cnc2c1c(=O)n(C)c(=O)n2C", "notasmiles"], n_select=2)
-assert sc["failed"] == ["notasmiles"], sc["failed"]
-assert len(sc["molecules"]) == 3 and len(sc["matrix"]) == 3, sc["molecules"]
-assert all(abs(sc["matrix"][i][i] - 1.0) < 1e-3 for i in range(3)), "self-similarity should be 1"
-assert sc["matrix"][0][1] == sc["matrix"][1][0], "similarity matrix must be symmetric"
-assert len(set(sc["selected"])) == 2, sc["selected"]
-# the two NSAIDs are more alike than either is to caffeine
-assert sc["matrix"][0][1] > sc["matrix"][0][2], sc["matrix"]
-
 rep = labs.repurposing_status()
 assert isinstance(rep["missing"], list) and rep["deps_ok"] is True, rep
 assert len(labs.repurposing_corpus()) >= 3, "repurposing corpus failed to parse"

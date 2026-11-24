@@ -1,4 +1,4 @@
-"""Lab modules: thin wrappers over the six research projects bundled in projects/.
+"""Lab modules: thin wrappers over the four research projects bundled in projects/.
 
 Each wrapper loads project modules by file path (the projects aren't installed packages and
 some have heavy optional imports in their __init__), and reports status so the UI can
@@ -11,16 +11,13 @@ import importlib.util
 import os
 import sys
 import threading
-import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / "projects"
 REPOS = {
-    "admet": ROOT / "ADMET-Prediction-System-Graph-Neural-Networks-with-RAG",
     "repurposing": ROOT / "Drug-Repurposing-Intelligence-System",
     "literature": ROOT / "Literature-Intelligence",
     "oncology": ROOT / "Oncology-Drug-Response-Prediction-System_DL-RAG",
-    "oncomolml": ROOT / "OncoMolML",
     "causal": ROOT / "TC-DrugRAG",
 }
 
@@ -82,56 +79,6 @@ def load_submodule(pkg, path, subdirs):
         del sys.modules[name]   # or the next call would return it half-loaded
         raise
     return mod
-
-
-# ---------------------------------------------------------------- ADMET (live model)
-@once
-def _admet():
-    import torch
-    r = REPOS["admet"]
-    F = load_module("pr_featurizer", r / "src/data/molecular_featurizer.py")
-    G = load_module("pr_gnn", r / "src/models/gnn_model.py")
-    feat = F.MolecularFeaturizer()
-    model = G.GNNPredictor(input_dim=feat.atom_feature_dim, hidden_dim=128, output_dim=1,
-                           num_layers=3, dropout=0.2, architecture="GCN", pooling="mean",
-                           edge_dim=feat.bond_feature_dim)
-    ckpt_path = r / "models/best_model.pt"
-    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    model.load_state_dict(ckpt["model_state_dict"])
-    model.eval()
-    return feat, model, ckpt.get("val_metrics", {}), ckpt.get("epoch")
-
-
-def admet_predict(smiles: str):
-    """Caco-2 permeability from the trained GCN, plus RDKit descriptors and rule-of-five style flags."""
-    import torch
-    from torch_geometric.data import Batch
-    feat, model, val, epoch = _admet()
-    graph = feat.smiles_to_graph(smiles)
-    if graph is None:
-        raise ValueError(f"RDKit could not parse SMILES: {smiles!r}")
-    with torch.no_grad():
-        pred = float(model(Batch.from_data_list([graph])).item())
-    d = feat.get_molecular_descriptors(smiles) or {}
-    flags = []
-    if d.get("molecular_weight", 0) > 500: flags.append("MW > 500")
-    if d.get("logp", 0) > 5: flags.append("logP > 5")
-    if d.get("num_h_donors", 0) > 5: flags.append("HBD > 5")
-    if d.get("num_h_acceptors", 0) > 10: flags.append("HBA > 10")
-    if d.get("tpsa", 0) > 140: flags.append("TPSA > 140")
-    if d.get("num_rotatable_bonds", 0) > 10: flags.append("RotB > 10")
-    return {
-        "smiles": smiles,
-        "endpoint": "Caco-2 permeability (Caco2_Wang)",
-        "unit": "log Papp (cm/s)",
-        "prediction": round(pred, 3),
-        "permeability": "high" if pred > -5.0 else "moderate" if pred > -6.0 else "low",
-        "descriptors": {k: round(v, 3) for k, v in d.items()},
-        "lipinski_violations": flags,
-        "graph": {"atoms": int(graph.num_nodes), "bonds": int(graph.num_edges // 2)},
-        "model": {"architecture": "GCN · 3 layers · 128 hidden", "trained_epoch": epoch,
-                  "val_metrics": {k: round(float(v), 4) for k, v in (val or {}).items()}},
-    }
 
 
 # ---------------------------------------------------------------- Literature (live APIs)
@@ -213,65 +160,6 @@ def score_causal_path(edges):
             "hops": len(edges),
             "chain": " · ".join(parts),
             "relations_known": [e.get("relation") in {r.value for r in s.CausalRelationType} for e in edges]}
-
-
-# ---------------------------------------------------------------- Screening (OncoMolML, JAX)
-@once
-def _jax_models():
-    return load_module("pr_jax", REPOS["oncomolml"] / "oncomolml/models/jax_models.py")
-
-
-def _fingerprints(smiles_list, nbits=1024, radius=2):
-    """RDKit graph (ADMET featurizer) -> OncoMolML's JAX Morgan fingerprint."""
-    import jax.numpy as jnp
-    import numpy as np
-    J = _jax_models()
-    feat, *_ = _admet()
-    fps, kept, failed = [], [], []
-    for s in smiles_list:
-        g = feat.smiles_to_graph(s)
-        if g is None:
-            failed.append(s)
-            continue
-        x = jnp.asarray(np.asarray(g.x, dtype="float32"))
-        n = int(x.shape[0])
-        adj = np.zeros((n, n), dtype="float32")
-        ei = np.asarray(g.edge_index)
-        if ei.size:
-            adj[ei[0], ei[1]] = 1.0
-        fps.append(J.morgan_fingerprint_jax(x, jnp.asarray(adj), radius=radius, nbits=nbits))
-        kept.append({"smiles": s, "atoms": n, "bonds": int(g.num_edges // 2)})
-    if not fps:
-        raise ValueError("no valid SMILES — RDKit could not parse any input")
-    return jnp.stack(fps), kept, failed
-
-
-def screen(smiles_list, n_select=0, nbits=1024, radius=2):
-    """Fingerprint a library, compute the Tanimoto matrix, and pick a diverse subset."""
-    import numpy as np
-    J = _jax_models()
-    t = time.perf_counter()
-    F, kept, failed = _fingerprints(smiles_list, nbits, radius)
-    sim = np.asarray(J.batch_tanimoto_matrix(F))
-    n = len(kept)
-    for i, m in enumerate(kept):
-        m["bits_set"] = int(np.asarray(F[i]).sum())
-        others = [sim[i][j] for j in range(n) if j != i]
-        m["max_similarity"] = round(float(max(others)), 3) if others else 0.0
-        m["mean_similarity"] = round(float(np.mean(others)), 3) if others else 0.0
-    picked = []
-    k = max(0, min(int(n_select), n))
-    if k:
-        # diversity_selection is @jit-decorated upstream but loops on n_select, which jit
-        # cannot trace; __wrapped__ is the same MaxMin routine without the decorator.
-        picked = [int(i) for i in np.asarray(J.diversity_selection.__wrapped__(F, n_select=k))]
-    pairs = sorted(({"a": kept[i]["smiles"], "b": kept[j]["smiles"], "similarity": round(float(sim[i][j]), 3)}
-                    for i in range(n) for j in range(i + 1, n)),
-                   key=lambda p: -p["similarity"])[:8]
-    return {"molecules": kept, "failed": failed, "matrix": [[round(float(v), 3) for v in row] for row in sim],
-            "selected": picked, "nearest_pairs": pairs, "nbits": nbits, "radius": radius,
-            "backend": f"JAX {__import__('jax').__version__} · {__import__('jax').devices()[0].platform.upper()}",
-            "ms": int((time.perf_counter() - t) * 1000)}
 
 
 # ---------------------------------------------------------------- Repurposing (Hetionet R-GCN)
@@ -544,12 +432,9 @@ def oncology_corpus():
 def status():
     out = []
     checks = [
-        ("ADMET GNN", "admet", "Caco-2 permeability from a trained 3-layer GCN", lambda: _admet() and "live"),
         ("Literature", "literature", "PubMed + bioRxiv retrieval clients", lambda: _clients() and "live"),
         ("Causal KG", "causal", "TC-DrugRAG causal path scoring", lambda: causal_schema() and "live"),
         ("Oncology KB", "oncology", "Curated drug-response corpus", lambda: "live" if oncology_corpus() else "empty"),
-        ("Screening", "oncomolml", "JAX Morgan fingerprints, Tanimoto, MaxMin diversity",
-         lambda: "live" if screen(["CCO", "CCN"], 1)["molecules"] else "empty"),
         ("Repurposing", "repurposing", "R-GCN link prediction over Hetionet",
          lambda: "live" if not repurposing_status()["missing"]
          else "needs: " + ", ".join(m["what"] for m in repurposing_status()["missing"])),

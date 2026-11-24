@@ -15,11 +15,9 @@ cryptography
 # sentence-transformers
 # Benchmark only: pandas, pyarrow, huggingface_hub
 
-# Optional: Molecules, Screening and Repurposing labs
+# Optional: Repurposing R-GCN lab
 # torch
 # torch-geometric
-# rdkit
-# jax
 # pandas
 # tqdm
 # pyyaml

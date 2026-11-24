@@ -213,13 +213,6 @@ class PathIn(BaseModel):
     edges: list[dict]
 
 
-class ScreenIn(BaseModel):
-    smiles: list[str]
-    n_select: int = 0
-    nbits: int = 1024
-    radius: int = 2
-
-
 @app.get("/api/health")
 def health():
     li = llm.info()
@@ -424,16 +417,6 @@ def import_papers(wid: str, body: ImportIn):
     return {"imported": n, "skipped": skipped}
 
 
-@app.get("/api/admet")
-def admet(smiles: str):
-    try:
-        return labs.admet_predict(smiles)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    except Exception as e:
-        raise HTTPException(503, f"{type(e).__name__}: {e}")
-
-
 @app.get("/api/causal/schema")
 def causal_schema():
     try:
@@ -446,19 +429,6 @@ def causal_schema():
 def causal_score(body: PathIn):
     try:
         return labs.score_causal_path(body.edges)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    except Exception as e:
-        raise HTTPException(503, f"{type(e).__name__}: {e}")
-
-
-@app.post("/api/screen")
-def screen(body: ScreenIn):
-    smiles = [s.strip() for s in body.smiles if s.strip()][:60]
-    if not smiles:
-        raise HTTPException(400, "no SMILES supplied")
-    try:
-        return labs.screen(smiles, body.n_select, max(64, min(body.nbits, 4096)), max(0, min(body.radius, 4)))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
