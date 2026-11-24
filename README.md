@@ -1,4 +1,22 @@
-# PandaRAG
+<p align="center">
+  <img src="frontend/logo.png" alt="PandaRAG logo" width="148" height="148">
+</p>
+
+<h1 align="center">PandaRAG</h1>
+
+<p align="center">
+  <strong>Glass-box retrieval-augmented generation &amp; scientific research workbench</strong><br>
+  Toggleable RAG pipeline · Live trace &amp; A/B ablations · PubMed/bioRxiv · Causal KG · Hetionet R-GCN
+</p>
+
+<p align="center">
+  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-1c1a14?style=flat-square">
+  <img alt="FastAPI" src="https://img.shields.io/badge/backend-FastAPI%20%2B%20SQLite-3a6b63?style=flat-square">
+  <img alt="BEIR SciFact nDCG@10" src="https://img.shields.io/badge/BEIR%20SciFact%20nDCG%4010-0.714-9a7b0a?style=flat-square">
+  <img alt="LLM Providers" src="https://img.shields.io/badge/LLMs-Ollama%20%C2%B7%20OpenAI%20%C2%B7%20Gemini%20%C2%B7%20Claude-5a5280?style=flat-square">
+</p>
+
+---
 
 **A glass-box RAG engine & scientific research workbench** — every retrieval stage is toggleable, traced with millisecond timings, benchmarked on BEIR, and wired directly into live PubMed/bioRxiv search, causal path scoring, and Hetionet drug repurposing.
 
