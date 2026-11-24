@@ -1,7 +1,7 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const state = { ws: null, opts: {}, lit: [], graph: null };
+const esc = (s) => String(s ?? "").replace(/<\/?(?:sup|sub|i|b|em|strong|u|small)\b[^>]*>/gi, "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const state = { ws: null, opts: {}, lit: [], graph: null, history: [], lastRun: null, bioLabs: true };
 
 async function api(path, opts) {
   const r = await fetch("/api" + path, {
@@ -54,6 +54,19 @@ $("#theme-btn").onclick = () => {
 };
 try { const t = localStorage.getItem("pandarag-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
 
+function setBioLabs(on) {
+  state.bioLabs = !!on;
+  $$("button.bio-tab", tabs).forEach((b) => { b.hidden = !state.bioLabs; });
+  $("#bio-btn").classList.toggle("active", state.bioLabs);
+  $("#bio-btn").textContent = state.bioLabs ? "⬡ bio labs" : "⬡ core rag";
+  const cur = $('button[aria-selected="true"]', tabs);
+  if (cur?.hidden) show("ask", $('button[data-view="ask"]', tabs));
+  else if (cur) moveGlider(cur, false);
+  try { localStorage.setItem("pandarag-bio", state.bioLabs ? "1" : "0"); } catch {}
+}
+$("#bio-btn").onclick = () => setBioLabs(!state.bioLabs);
+try { const b = localStorage.getItem("pandarag-bio"); if (b === "0") setBioLabs(false); } catch {}
+
 /* ---------------- workspaces ---------------- */
 async function loadWorkspaces(select) {
   const ws = await api("/workspaces");
@@ -63,7 +76,7 @@ async function loadWorkspaces(select) {
   sel.value = state.ws || "";
   return ws;
 }
-$("#ws-select").onchange = (e) => { state.ws = e.target.value; refreshActive(); };
+$("#ws-select").onchange = (e) => { state.ws = e.target.value; state.history = []; renderChatHistory(); refreshActive(); };
 function refreshActive() {
   const v = $$(".view").find((s) => !s.hidden)?.id.replace("view-", "");
   onShow[v]?.();
@@ -71,12 +84,13 @@ function refreshActive() {
 
 /* ---------------- ASK ---------------- */
 const OPTS = [
-  ["hybrid", "Hybrid BM25 + dense"], ["graph", "GraphRAG expansion"], ["rerank", "MMR rerank"],
-  ["decompose", "Query decomposition"], ["hyde", "HyDE"], ["crag", "Corrective grading"],
+  ["hybrid", "Hybrid BM25 + dense", true], ["graph", "GraphRAG expansion", true], ["rerank", "MMR rerank", true],
+  ["decompose", "Query decomposition", true], ["hyde", "HyDE", true], ["crag", "Corrective grading", true],
+  ["auto_pubmed", "Auto-PubMed on gap", false],
 ];
-$("#opts").innerHTML = OPTS.map(([k, label]) =>
-  `<label class="toggle"><input type="checkbox" data-opt="${k}" checked><i></i>${label}</label>`).join("");
-OPTS.forEach(([k]) => (state.opts[k] = true));
+$("#opts").innerHTML = OPTS.map(([k, label, def]) =>
+  `<label class="toggle"><input type="checkbox" data-opt="${k}" ${def ? "checked" : ""}><i></i>${label}</label>`).join("");
+OPTS.forEach(([k, , def]) => (state.opts[k] = def));
 $("#opts").addEventListener("change", (e) => { state.opts[e.target.dataset.opt] = e.target.checked; });
 
 $("#q-chips").innerHTML = ["What are the main mechanisms described?", "Compare the agents on toxicity",
@@ -86,14 +100,68 @@ $("#q-chips").addEventListener("click", (e) => {
   if (e.target.classList.contains("chip")) { $("#q").value = e.target.textContent; $("#ask-btn").click(); }
 });
 
+function renderChatHistory() {
+  const pairs = [];
+  for (let i = 0; i < state.history.length; i += 2) {
+    if (state.history[i] && state.history[i + 1]) pairs.push([state.history[i].content, state.history[i + 1].content]);
+  }
+  $("#chat-turns").innerHTML = pairs.map(([uq, aa]) =>
+    `<div class="turn"><div class="tq">Q: ${esc(uq)}</div><div class="ta">${esc(aa)}</div></div>`).join("");
+  $("#chat-clear").hidden = !pairs.length;
+  if (pairs.length) $("#chat-turns").scrollTop = $("#chat-turns").scrollHeight;
+}
+$("#chat-clear").onclick = () => { state.history = []; renderChatHistory(); toast("Conversation thread cleared"); };
+
 const cited = (text) => esc(text).replace(/\[(\d+)\]/g, (_, n) => `<cite data-ref="${n}">${n}</cite>`);
 
-function renderAnswer(res) {
+function formatMarkdown(q, res) {
+  const refs = (res.sources || []).map((s, i) => `[${i + 1}] **${s.title}** (${s.source}, grade ${s.grade}): ${s.text}`).join("\n");
+  return `## ${q}\n\n${res.answer}\n\n### References\n${refs || "_No references_"}\n`;
+}
+
+async function fetchPubMedAndReask(q) {
+  toast("Fetching PubMed abstracts…");
+  const lit = await api("/literature", { body: { query: q, sources: ["pubmed"], max_results: 5 } });
+  if (!lit.papers?.length) return toast("No PubMed papers found for that query", true);
+  const imp = await api(`/workspaces/${state.ws}/import`, { body: { papers: lit.papers } });
+  toast(`Imported ${imp.imported} papers (${imp.skipped || 0} duplicates skipped) — re-running…`);
+  await loadWorkspaces(state.ws);
+  $("#q").value = q;
+  $("#ask-btn").click();
+}
+
+function renderAnswer(res, queryText = "") {
+  state.lastRun = { query: queryText || $("#q").value.trim(), res };
   const wrap = $("#answer-wrap"), body = cited(res.answer);
-  wrap.innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:12px">
-      <span class="tag info">${esc(res.mode)}</span>
+  const cragAct = res.crag?.action;
+  const cragBanner = (cragAct === "knowledge_gap" || cragAct === "augment")
+    ? `<div class="banner"><div><b>CRAG ${esc(cragAct.replace("_", " "))}</b> — ${cragAct === "knowledge_gap" ? "no grounded passages passed grading." : "only weak/ambiguous passages found."}</div>
+       <button class="mini" id="crag-pubmed-btn">❖ Fetch PubMed &amp; re-ask</button></div>`
+    : (res.crag?.augmented_papers ? `<div class="banner"><div><b>CRAG augmented</b> — automatically imported ${res.crag.augmented_papers} PubMed abstracts.</div></div>` : "");
+  wrap.innerHTML = `${cragBanner}
+    <div class="row" style="justify-content:space-between;margin-bottom:12px">
+      <div class="row" style="gap:6px"><span class="tag info">${esc(res.mode)}</span>
+        <button class="mini" id="copy-md-btn">copy markdown</button>
+        ${res.sources.length ? '<button class="mini" id="to-causal-btn">⇝ draft causal chain</button>' : ""}</div>
       <span class="eyebrow">${res.total_ms} ms · ${res.sources.length} passages</span></div>
     <div class="answer">${body}</div>`;
+
+  $("#crag-pubmed-btn")?.addEventListener("click", () => fetchPubMedAndReask(state.lastRun.query).catch((e) => toast(e.message, true)));
+  $("#copy-md-btn")?.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(formatMarkdown(state.lastRun.query, res));
+    toast("Copied cited Markdown to clipboard");
+  });
+  $("#to-causal-btn")?.addEventListener("click", async () => {
+    try {
+      const out = await api(`/workspaces/${state.ws}/causal-extract`, { body: { query: state.lastRun.query, sources: res.sources } });
+      if (!out.edges?.length) return toast("No causal hops found in retrieved passages", true);
+      if (!state.bioLabs) setBioLabs(true);
+      seedEdges.splice(0, seedEdges.length, ...out.edges);
+      show("causal", $('button[data-view="causal"]', tabs));
+      renderEdges();
+      toast(`Drafted ${out.edges.length} causal hops from RAG evidence`);
+    } catch (e) { toast(e.message, true); }
+  });
 
   $("#metrics").innerHTML = [["faithfulness", "Faithfulness"], ["answer_relevance", "Answer relevance"],
     ["context_precision", "Context precision"]].map(([k, label]) => {
@@ -126,7 +194,7 @@ function renderSources(sources) {
         <span class="tag">score ${s.score}</span>${s.via_graph ? '<span class="tag info">via graph</span>' : ""}
         <span class="tag">${esc(s.source)}</span>
         <button class="mini" data-more="${i}">expand</button></div></div>`;
-  }).join("") : '<div class="empty"><b>No grounded evidence</b>Add documents, or relax the filters.</div>';
+  }).join("") : '<div class="empty"><b>No grounded evidence</b>Add documents, or click Fetch PubMed.</div>';
   $$("#sources [data-more]").forEach((b) => b.onclick = () => {
     const p = b.closest(".src").querySelector("p");
     p.classList.toggle("open"); b.textContent = p.classList.contains("open") ? "collapse" : "expand";
@@ -145,7 +213,7 @@ async function askStream(body) {
     const lines = (buf + value).split("\n");
     buf = lines.pop();
     const before = text;
-    for (const ev of lines.map((l) => JSON.parse(l))) {
+    for (const ev of lines.filter(Boolean).map((l) => JSON.parse(l))) {
       if (ev.error) throw new Error(ev.error);
       if (ev.sources) renderSources(ev.sources);
       if (ev.delta) text += ev.delta;
@@ -154,7 +222,8 @@ async function askStream(body) {
     if (text !== before && !result) $("#answer-wrap").innerHTML = `<div class="answer">${cited(text)}</div>`;
   }
   if (!result) throw new Error("The connection closed before the answer finished");
-  renderAnswer(result);
+  renderAnswer(result, body.query);
+  return result;
 }
 
 $("#ask-btn").onclick = async () => {
@@ -165,13 +234,58 @@ $("#ask-btn").onclick = async () => {
   $("#answer-wrap").innerHTML = '<div class="row"><span class="spin"></span><span style="color:var(--text-3)">running pipeline…</span></div>';
   try {
     $("#answer-wrap").setAttribute("aria-busy", "true");
-    await askStream({ query: q, k: 6, ...state.opts });
+    const res = await askStream({ query: q, k: 6, ...state.opts, history: state.history.slice(-6) });
+    if (res?.answer) {
+      state.history.push({ role: "user", content: q }, { role: "assistant", content: res.answer });
+      renderChatHistory();
+    }
+    if (res?.crag?.augmented_papers) loadWorkspaces(state.ws);
   } catch (e) {
     $("#answer-wrap").innerHTML = `<div class="empty"><b>Request failed</b>${esc(e.message)}</div>`;
     toast(e.message, true);
   } finally { $("#answer-wrap").removeAttribute("aria-busy"); btn.disabled = false; btn.textContent = "Retrieve & answer"; }
 };
 $("#q").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) $("#ask-btn").click(); });
+
+$("#compare-btn").onclick = async () => {
+  const q = $("#q").value.trim();
+  if (!q) return toast("Type a question first", true);
+  if (!state.ws) return toast("Create a workspace first", true);
+  const btn = $("#compare-btn"); btn.disabled = true; btn.textContent = "Comparing…";
+  $("#answer-wrap").innerHTML = '<div class="row"><span class="spin"></span><span style="color:var(--text-3)">running A/B ablation (Baseline vs Current Pipeline)…</span></div>';
+  try {
+    const out = await api(`/workspaces/${state.ws}/compare`, {
+      body: {
+        query: q, k: 6,
+        config_a: { hybrid: true, graph: false, rerank: false, decompose: false, hyde: false, crag: false },
+        config_b: { ...state.opts },
+      },
+    });
+    const col = (title, r) => `<div class="ab-col">
+      <h4><span>${title}</span><span class="tag">${r.total_ms}ms · ${r.sources.length} hits</span></h4>
+      <div class="row" style="gap:6px;margin-bottom:8px">
+        <span class="tag ok">faith ${(r.metrics.faithfulness * 100).toFixed(0)}%</span>
+        <span class="tag info">rel ${(r.metrics.answer_relevance * 100).toFixed(0)}%</span>
+        <span class="tag">prec ${(r.metrics.context_precision * 100).toFixed(0)}%</span></div>
+      <div class="ab-ans">${cited(r.answer)}</div>
+      <div class="chips">${r.sources.map((s, i) => `<span class="tag">[${i + 1}] ${esc(s.title.slice(0, 28))} (${s.grade})</span>`).join("")}</div></div>`;
+    $("#answer-wrap").innerHTML = `<span class="eyebrow">Side-by-side RAG ablation</span>
+      <div class="ab-grid">${col("A · Baseline", out.a)}${col("B · Current", out.b)}</div>`;
+    $("#metrics").innerHTML = [["faithfulness", "Faithfulness (B)"], ["answer_relevance", "Relevance (B)"],
+      ["context_precision", "Precision (B)"]].map(([k, label]) => {
+      const v = out.b.metrics[k] ?? 0;
+      return `<div class="stat"><div class="k">${label}</div><div class="v">${(v * 100).toFixed(0)}<small>%</small></div>
+        <div class="meter"><i style="width:${Math.round(v * 100)}%"></i></div></div>`;
+    }).join("");
+    $("#trace").innerHTML = out.b.trace.map((t) => `<div class="step"><div class="bul"></div>
+      <div><b>${esc(t.stage)}</b><code>${esc(JSON.stringify(t.detail).slice(1, -1).replace(/"/g, ""))}</code></div>
+      <div class="ms">${t.ms}ms</div></div>`).join("");
+    renderSources(out.b.sources);
+  } catch (e) {
+    $("#answer-wrap").innerHTML = `<div class="empty"><b>Ablation failed</b>${esc(e.message)}</div>`;
+    toast(e.message, true);
+  } finally { btn.disabled = false; btn.textContent = "A/B ablation"; }
+};
 
 /* ---------------- KNOWLEDGE ---------------- */
 onShow.knowledge = async () => {
@@ -192,24 +306,114 @@ $("#d-add").onclick = async () => {
   const title = $("#d-title").value.trim() || "Untitled", text = $("#d-text").value.trim();
   if (!text) return toast("Paste some text first", true);
   try {
-    await api(`/workspaces/${state.ws}/docs`, { body: { title, text } });
+    const r = await api(`/workspaces/${state.ws}/docs`, { body: { title, text } });
     $("#d-title").value = $("#d-text").value = "";
-    toast("Ingested & indexed"); onShow.knowledge(); loadWorkspaces(state.ws);
+    toast(r.duplicate ? "Already in workspace (skipped duplicate)" : "Ingested & indexed");
+    onShow.knowledge(); loadWorkspaces(state.ws);
   } catch (e) { toast(e.message, true); }
 };
-$("#d-file").onclick = () => $("#d-input").click();
-$("#d-input").onchange = async (e) => {
-  const f = e.target.files[0]; if (!f) return;
-  const btn = $("#d-file"), label = btn.textContent;
-  btn.disabled = $("#d-add").disabled = true; btn.textContent = "Reading…";
+$("#d-fetch").onclick = async () => {
+  const url = $("#d-url").value.trim();
+  if (!url) return toast("Enter a URL or DOI first", true);
+  const btn = $("#d-fetch"); btn.disabled = true; btn.textContent = "Fetching…";
   try {
-    const pdf = /\.pdf$/i.test(f.name) ? await api("/pdf", { body: f }) : null;
-    $("#d-text").value = pdf ? pdf.text : await f.text(); $("#d-title").value ||= f.name.replace(/\.\w+$/, "");
-    const blank = pdf?.blank ? `, ${pdf.blank} without text` : "";
-    toast(pdf ? `${pdf.pages} page${pdf.pages > 1 ? "s" : ""}${blank} — review, then ingest` : "File loaded — review, then ingest");
-  } catch (err) { toast(err.message, true); }
-  finally { e.target.value = ""; btn.disabled = $("#d-add").disabled = false; btn.textContent = label; }
+    const r = await api("/url", { body: { url } });
+    $("#d-title").value = r.title || url;
+    $("#d-text").value = r.text;
+    $("#d-url").value = "";
+    toast("Fetched — review, then click Ingest");
+  } catch (e) { toast(e.message, true); }
+  finally { btn.disabled = false; btn.textContent = "fetch"; }
 };
+$("#d-url").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#d-fetch").click(); });
+$("#d-file").onclick = () => $("#d-input").click();
+const dropzone = $("#dropzone"), batchLog = $("#batch-log");
+
+async function readSingleFile(f) {
+  if (/\.pdf$/i.test(f.name)) {
+    const r = await api("/pdf", { body: f });
+    return { title: f.name.replace(/\.[^.]+$/, ""), text: r.text, source: "pdf", meta: r };
+  }
+  return { title: f.name.replace(/\.[^.]+$/, ""), text: await f.text(), source: "file", meta: null };
+}
+
+async function handleFiles(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+  if (!state.ws) return toast("Create a workspace first", true);
+
+  // Single file: load into the editor for quick review (familiar workflow).
+  if (files.length === 1) {
+    const f = files[0];
+    const btn = $("#d-file"), label = btn.textContent;
+    btn.disabled = $("#d-add").disabled = true; btn.textContent = "Reading…";
+    try {
+      const got = await readSingleFile(f);
+      $("#d-text").value = got.text;
+      $("#d-title").value = got.title;
+      const blank = got.meta?.blank ? `, ${got.meta.blank} without text` : "";
+      toast(got.meta ? `${got.meta.pages} page${got.meta.pages > 1 ? "s" : ""}${blank} — review, then ingest` : "File loaded — review, then ingest");
+    } catch (err) { toast(err.message, true); }
+    finally { btn.disabled = $("#d-add").disabled = false; btn.textContent = label; }
+    return;
+  }
+
+  // Multiple files: extract with live per-file progress and ingest in one atomic batch.
+  const btn = $("#d-file"), label = btn.textContent;
+  btn.disabled = $("#d-add").disabled = true;
+  batchLog.innerHTML = "";
+  const ready = [], failed = [];
+
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    btn.textContent = `Reading ${i + 1}/${files.length}…`;
+    const row = document.createElement("div");
+    row.className = "batch-row";
+    row.innerHTML = `<span title="${esc(f.name)}">${esc(f.name)}</span><span class="tag info">reading…</span>`;
+    batchLog.append(row);
+    batchLog.scrollTop = batchLog.scrollHeight;
+    try {
+      const got = await readSingleFile(f);
+      if (!got.text.trim()) throw new Error("empty file");
+      ready.push({ title: got.title, text: got.text, source: got.source });
+      row.lastElementChild.className = "tag ok";
+      row.lastElementChild.textContent = got.meta ? `${got.meta.pages}p ready` : "ready";
+    } catch (err) {
+      failed.push(f.name);
+      row.lastElementChild.className = "tag bad";
+      row.lastElementChild.textContent = err.message.slice(0, 32);
+    }
+  }
+
+  if (ready.length) {
+    btn.textContent = `Ingesting ${ready.length}…`;
+    try {
+      const res = await api(`/workspaces/${state.ws}/docs/batch`, { body: { docs: ready } });
+      const parts = [`Ingested ${res.imported}`];
+      if (res.skipped) parts.push(`${res.skipped} duplicate${res.skipped === 1 ? "" : "s"} skipped`);
+      if (failed.length) parts.push(`${failed.length} failed`);
+      toast(parts.join(" · "), failed.length > 0 && res.imported === 0);
+      await onShow.knowledge();
+      await loadWorkspaces(state.ws);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  } else {
+    toast("No readable files in that batch", true);
+  }
+  btn.disabled = $("#d-add").disabled = false;
+  btn.textContent = label;
+}
+
+$("#d-input").onchange = async (e) => {
+  await handleFiles(e.target.files);
+  e.target.value = "";
+};
+dropzone.onclick = () => $("#d-input").click();
+dropzone.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#d-input").click(); } };
+["dragenter", "dragover"].forEach((ev) => dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.add("over"); }));
+["dragleave", "drop"].forEach((ev) => dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.remove("over"); }));
+dropzone.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files); });
 $("#w-add").onclick = async () => {
   const name = $("#w-name").value.trim();
   if (!name) return toast("Name the workspace", true);
@@ -455,8 +659,15 @@ $("#lit-btn").onclick = async () => {
 $("#lit-q").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#lit-btn").click(); });
 $("#lit-import").onclick = async () => {
   const res = await api(`/workspaces/${state.ws}/import`, { body: { papers: state.lit } });
-  toast(`Imported ${res.imported} abstracts into the workspace`);
+  const skip = res.skipped ? ` (${res.skipped} duplicate${res.skipped === 1 ? "" : "s"} skipped)` : "";
+  toast(`Imported ${res.imported} abstracts${skip}`);
+  $("#lit-ask").hidden = false;
   loadWorkspaces(state.ws);
+};
+$("#lit-ask").onclick = () => {
+  const q = $("#lit-q").value.trim();
+  if (q) $("#q").value = `Summarize the key findings and mechanisms related to ${q}`;
+  show("ask", $('button[data-view="ask"]', tabs));
 };
 
 /* ---------------- MOLECULES ---------------- */
@@ -622,14 +833,22 @@ $("#rep-btn").onclick = async () => {
     $("#rep-out").innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:12px">
         <span class="tag info">${esc(r.drug)}</span>
         <span class="eyebrow">${r.known_indications.length} known indication${r.known_indications.length === 1 ? "" : "s"} in Hetionet</span></div>
-      <table><thead><tr><th>Disease</th><th style="text-align:right">Score</th><th style="text-align:right">In Hetionet</th></tr></thead><tbody>
+      <table><thead><tr><th>Disease</th><th style="text-align:right">Score</th><th style="text-align:right">In Hetionet</th><th></th></tr></thead><tbody>
       ${r.results.map((x) => `<tr><td>${esc(x.disease)}</td>
         <td class="num" style="text-align:right">${x.score.toFixed(3)}</td>
-        <td style="text-align:right">${x.known ? '<span class="tag ok">known treats edge</span>' : '<span class="tag">unseen pair</span>'}</td></tr>`).join("")}
+        <td style="text-align:right">${x.known ? '<span class="tag ok">known treats edge</span>' : '<span class="tag">unseen pair</span>'}</td>
+        <td style="text-align:right"><button class="mini" data-ev-drug="${esc(r.drug)}" data-ev-dis="${esc(x.disease)}">evidence →</button></td></tr>`).join("")}
       </tbody></table>
       <p class="sub" style="margin-top:12px">${state.repGraphMode
         ? "Scores come from message passing over Hetionet minus treats edges, but 137 diseases and 528 training edges is a small world — treat a high-scoring unseen pair as a hypothesis to check, not a finding."
         : "Scores lean on how often a disease appears among the 755 training edges, so a high score on an unseen pair is a frequency effect, not a discovery."}</p>`;
+    $$("#rep-out [data-ev-drug]").forEach((b) => b.onclick = () => {
+      $("#q").value = `What mechanistic or clinical evidence links ${b.dataset.evDrug} to ${b.dataset.evDis}?`;
+      const autoBox = $('#opts input[data-opt="auto_pubmed"]');
+      if (autoBox && !autoBox.checked) { autoBox.checked = true; state.opts.auto_pubmed = true; }
+      show("ask", $('button[data-view="ask"]', tabs));
+      $("#ask-btn").click();
+    });
   } catch (e) {
     $("#rep-out").innerHTML = `<div class="empty"><b>Prediction failed</b>${esc(e.message)}</div>`;
   } finally { btn.disabled = false; btn.textContent = "Rank"; }
@@ -638,7 +857,8 @@ $("#rep-import").onclick = async () => {
   if (!state.ws) return toast("No workspace selected", true);
   try {
     const r = await api(`/workspaces/${state.ws}/seed/repurposing`, { body: {} });
-    toast(`Imported ${r.imported} mechanism notes`); loadWorkspaces(state.ws);
+    const skip = r.skipped ? ` (${r.skipped} already present)` : "";
+    toast(`Imported ${r.imported} mechanism notes${skip}`); loadWorkspaces(state.ws);
   } catch (e) { toast(e.message, true); }
 };
 
@@ -719,16 +939,19 @@ const STACK = [
   ["GraphRAG expansion", "Entity co-occurrence graph: query entities and their strongest neighbours boost their chunks."],
   ["MMR rerank", "Maximal marginal relevance trades relevance against redundancy so passages do not repeat each other."],
   ["Corrective RAG", "Every passage is graded relevant / ambiguous / irrelevant; irrelevant ones are dropped before generation."],
-  ["Grounded generation", "Claude answers from the passages with inline citations; without a key, an extractive answer is assembled."],
-  ["Self-reflection", "Faithfulness, answer relevance and context precision computed per run, in the open."],
+  ["Grounded generation", "Claude, OpenAI, Gemini, or local Ollama answer with inline citations; extractive fallback needs no key."],
+  ["Self-reflection", "Polarity-aware & semantic faithfulness, answer relevance and rank-aware context precision per run."],
 ];
 async function health() {
   try {
     const h = await api("/health");
+    if (h.plugins === "core" && localStorage.getItem("pandarag-bio") == null) setBioLabs(false);
     $("#llm-pill").innerHTML = h.llm
-      ? `<span class="dot"></span>${esc(h.model)}`
+      ? `<span class="dot"></span>${esc(h.provider)} · ${esc(h.model)}`
       : '<span class="dot off"></span>extractive mode';
-    $("#llm-pill").title = h.llm ? "Grounded generation via Claude" : "Set ANTHROPIC_API_KEY for generative answers";
+    $("#llm-pill").title = h.llm
+      ? `Provider: ${h.provider} (${h.model}) · Embedder: ${h.embedder}`
+      : `Set ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL (Ollama), or GEMINI_API_KEY · Embedder: ${h.embedder}`;
     $("#labs").innerHTML = h.labs.map((l) => {
       const live = l.state === "live";
       return `<div class="stat"><div class="row" style="justify-content:space-between">

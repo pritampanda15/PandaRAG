@@ -97,6 +97,37 @@ nav.tabs button:hover{color:var(--text-2)}
 nav.tabs button[aria-selected="true"]{color:var(--text)}
 nav.tabs button:active{transform:scale(.97)}
 nav.tabs button i{font-style:normal; opacity:.55; font-size:.9rem}
+nav.tabs button.bio-tab[hidden]{display:none}
+button.ghost.active{color:var(--bamboo); border-color:color-mix(in srgb,var(--bamboo) 50%, transparent); background:color-mix(in srgb,var(--bamboo) 10%, transparent)}
+
+/* chat history & corrective banner & A/B compare */
+.chat-turns{display:flex; flex-direction:column; gap:10px; margin-bottom:14px; max-height:240px; overflow-y:auto; padding-right:4px}
+.chat-turns:empty{display:none}
+.turn{border:1px solid var(--line); border-radius:var(--r-sm); padding:10px 12px; background:color-mix(in srgb,var(--ink-3) 55%, transparent); font-size:.84rem}
+.turn .tq{font-weight:600; color:var(--text); margin-bottom:4px}
+.turn .ta{color:var(--text-2); line-height:1.5; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden}
+.banner{border:1px solid color-mix(in srgb,var(--amber) 45%, transparent); background:color-mix(in srgb,var(--amber) 9%, transparent); border-radius:var(--r-sm); padding:11px 14px; margin-bottom:14px; display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; font-size:.83rem}
+.banner b{color:var(--amber)}
+.ab-grid{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:16px}
+@media(max-width:860px){.ab-grid{grid-template-columns:1fr}}
+.ab-col{border:1px solid var(--line); border-radius:var(--r-sm); padding:14px; background:color-mix(in srgb,var(--ink-3) 65%, transparent)}
+.ab-col h4{margin:0 0 8px; font:600 .82rem/1.2 var(--font-mono); letter-spacing:.06em; text-transform:uppercase; color:var(--text-2); display:flex; justify-content:space-between; align-items:center}
+.ab-ans{font:400 .95rem/1.6 var(--font-display); white-space:pre-wrap; margin:10px 0}
+
+/* batch dropzone */
+.dropzone{
+  margin-top:14px; border:1.5px dashed var(--line-2); border-radius:var(--r-sm); padding:18px 14px;
+  text-align:center; cursor:pointer; background:color-mix(in srgb,var(--ink-3) 55%, transparent);
+  transition:border-color .18s var(--ease), background .18s var(--ease), transform .14s var(--ease);
+}
+.dropzone:hover,.dropzone.over{border-color:var(--bamboo); background:color-mix(in srgb,var(--bamboo) 10%, transparent)}
+.dropzone.over{transform:scale(1.01)}
+.dropzone b{display:block; font:500 .88rem/1.3 var(--font-body); color:var(--text)}
+.dropzone small{display:block; margin-top:4px; font:400 .75rem/1.4 var(--font-mono); color:var(--text-3)}
+.batch-log{margin-top:10px; display:flex; flex-direction:column; gap:5px; max-height:150px; overflow-y:auto}
+.batch-log:empty{display:none}
+.batch-row{display:flex; justify-content:space-between; gap:8px; align-items:center; font:500 .74rem/1.3 var(--font-mono); padding:5px 8px; border-radius:6px; border:1px solid var(--line); background:color-mix(in srgb,var(--ink-3) 70%, transparent)}
+.batch-row span:first-child{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 
 /* ---------- panels ---------- */
 main{overflow:hidden; padding:16px 22px 22px; min-height:0}

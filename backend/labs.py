@@ -200,11 +200,18 @@ def score_causal_path(edges):
     temporal = 1.0 if years == sorted(years) and years else 0.5
     diversity = len({e.get("evidence") for e in edges}) / len(edges)
     total = 0.35 * ev + 0.25 * depth + 0.20 * temporal + 0.20 * diversity
+    parts = []
+    for i, e in enumerate(edges):
+        rel = e.get("relation", "LEADS_TO")
+        if i == 0 or e["source"] != edges[i - 1]["target"]:
+            parts.append(f"{e['source']} —[{rel}]→ {e['target']}")
+        else:
+            parts[-1] += f" —[{rel}]→ {e['target']}"
     return {"score": round(total, 3),
             "components": {"evidence": round(ev, 3), "causal_depth": round(depth, 3),
                            "temporal": round(temporal, 3), "diversity": round(diversity, 3)},
             "hops": len(edges),
-            "chain": " → ".join([edges[0]["source"]] + [f'{e.get("relation","LEADS_TO")}→{e["target"]}' for e in edges]),
+            "chain": " · ".join(parts),
             "relations_known": [e.get("relation") in {r.value for r in s.CausalRelationType} for e in edges]}
 
 

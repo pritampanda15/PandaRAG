@@ -1,165 +1,158 @@
 # PandaRAG
 
-A domain-agnostic RAG engine with a tab per capability, plus live wrappers around six
-bundled research projects' working models.
+**A glass-box RAG engine & biomedical research workbench** — every retrieval stage is toggleable, traced with millisecond timings, benchmarked on BEIR, and wired directly into live PubMed/bioRxiv search, molecular ADMET prediction, JAX library screening, causal path scoring, and Hetionet drug repurposing.
+
+Use it in **Full Bio Workbench** mode (all 9 tabs) or flip the **Core RAG / Bio Labs** switch in the header (or `PANDARAG_PLUGINS=core`) for a clean, domain-agnostic 3-tab RAG engine (**Ask · Knowledge · Graph**).
 
 ```bash
-sh run.sh      # http://localhost:8787
+pip install -r requirements.txt
+sh run.sh                          # http://localhost:8787
 ```
 
-Requires Python 3.10+. Install with `pip install -r requirements.txt`. That covers Ask, Knowledge,
-Graph, Literature and Causal; uncomment the extras in that file for the rest.
+Or install as a CLI / run with Docker:
 
-The parts of the six research projects that PandaRAG uses are bundled in `projects/`, including
-the trained ADMET checkpoint, so nothing else needs cloning. Two things are not bundled: Hetionet
-(714 MB of JSON once unpacked) and the trained R-GCN checkpoint, which Repurposing needs; see the rebuild steps below. Variant
-effects is not included. The "live" states below describe the author's machine.
+```bash
+pip install -e .                   # or pip install -e ".[neural]"
+pandarag --port 8787               # --plugins core for RAG-only mode
+```
 
-Optional environment:
+```bash
+docker compose up --build          # set INSTALL_NEURAL=1 to bake bge-small-en-v1.5
+```
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U[User Query + Chat History] --> RW[Follow-up Rewrite]
+    RW --> QP["Parallel Query Planning\n(Decompose + HyDE)"]
+    QP --> BM25["Sparse BM25\n(positive hits only)"]
+    QP --> DENSE["Dense Embeddings\n(bge-small / LSA + SQLite vec cache)"]
+    BM25 --> RRF["Weighted RRF Fusion"]
+    DENSE --> RRF
+    RRF --> GR["GraphRAG Expansion\n(entities + community reps)"]
+    GR --> MMR["MMR Rerank"]
+    MMR --> CRAG["Corrective Grading (CRAG)\n+ backfill"]
+    CRAG -->|knowledge_gap| PM["Optional PubMed Fallback\n(1-click or auto)"]
+    PM --> DENSE
+    CRAG --> GEN["Streaming Grounded Generation\n(Ollama · OpenAI · Gemini · Claude · Extractive)"]
+    GEN --> REF["Polarity & Semantic\nSelf-Reflection Metrics"]
+    GEN --> CAUSAL["→ Draft Causal Chain (TC-DrugRAG)"]
+```
+
+---
+
+## Key Capabilities
+
+### Glass-Box RAG Engine (Core Tabs)
+- **Ask** — Multi-turn RAG with clickable inline `[n]` citations, live per-stage latency trace, **A/B Ablation Compare** (Baseline Hybrid vs. active toggles side-by-side), **CRAG PubMed fallback**, **Copy Markdown + References**, and **→ Draft Causal Chain** extraction.
+- **Knowledge** — SQLite-persisted workspaces (`data/pandarag.db`, auto-migrating legacy `store.json`) with SHA-256 deduplication, persistent neural vector caching across restarts, PDF upload (up to 50 MB with running-header removal), and **URL / DOI fetching** (`POST /api/url`).
+- **Graph** — Interactive, spinnable SVG chord diagram of entity co-occurrences and modularity communities; biomedical suffix heuristics activate only for biomedical workspaces so general workspaces stay clean.
+
+### Connected Biomedical Research Labs (`⬡ bio labs` toggle)
+- **Literature** — Live PubMed + bioRxiv search, deduplicated one-click workspace import, and direct handoff to Ask.
+- **Molecules** — Caco-2 permeability prediction from the bundled trained 3-layer GCN (`ADMET-Prediction-System-Graph-Neural-Networks-with-RAG`) + RDKit physicochemical descriptors and Lipinski flags.
+- **Screening** — JAX Morgan fingerprints, pairwise Tanimoto similarity heatmap, and MaxMin diverse subset selection (`OncoMolML`).
+- **Causal** — Mechanistic causal chain editor & scorer (`TC-DrugRAG`), pre-fillable directly from any RAG answer.
+- **Repurposing** — R-GCN link prediction over Hetionet (47,031 nodes, 2.25M edges) with an honest model card and per-row **"Evidence →"** buttons that launch RAG + PubMed verification for any candidate compound-disease pair.
+- **Labs** — Live system status across all six bundled research modules and active retrieval/LLM stack.
+
+---
+
+## LLM & Environment Configuration
+
+PandaRAG works out of the box with **zero API keys** (extractive mode). Configure any LLM provider for streaming generative answers, HyDE, query decomposition, and multi-turn rewrites:
+
+| Provider | Environment Variables | Default Model |
+| :--- | :--- | :--- |
+| **Ollama (local)** | `OLLAMA_MODEL=llama3.2` *(optional `OLLAMA_HOST`)* | `llama3.2` |
+| **OpenAI / OpenAI-compatible** | `OPENAI_API_KEY=...` *(optional `OPENAI_BASE_URL` for vLLM, LM Studio, OpenRouter, Groq)* | `gpt-4o-mini` |
+| **Google Gemini** | `GEMINI_API_KEY=...` *(or `GOOGLE_API_KEY`)* | `gemini-2.5-flash` |
+| **Anthropic Claude** | `ANTHROPIC_API_KEY=...` | `claude-sonnet-4-5-20250929` |
+
+Additional options:
 
 | Variable | Effect |
-| --- | --- |
-| `ANTHROPIC_API_KEY` | Generative, cited answers via Claude, streamed as they are written. Without it the engine answers extractively — everything else is unchanged. |
-| `PANDARAG_MODEL` | Model id (default `claude-sonnet-5-5`). |
-| `PANDARAG_EMBED_MODEL` | A sentence-transformers model name; naming one downloads it if needed. Unset, `BAAI/bge-small-en-v1.5` is used when `sentence-transformers` is installed and that model is already on disk, otherwise a local TF-IDF + SVD (LSA) embedder. `lsa` forces LSA. |
-| `PANDARAG_NCBI_EMAIL`, `NCBI_API_KEY` | PubMed etiquette and higher rate limits. |
+| :--- | :--- |
+| `PANDARAG_PROVIDER` | Force provider (`ollama`, `openai`, `gemini`, `anthropic`). Auto-detected if unset. |
+| `PANDARAG_MODEL` | Override model id for the active provider. |
+| `PANDARAG_EMBED_MODEL` | Any `sentence-transformers` model name (auto-downloads if named). Unset uses `BAAI/bge-small-en-v1.5` when installed locally, else local TF-IDF + SVD (`lsa`). Set `lsa` to force LSA. |
+| `PANDARAG_PLUGINS` | `bio` (default, all tabs) or `core` (Ask, Knowledge, Graph only). Can also be toggled in the UI. |
+| `PANDARAG_DATA` | Custom directory for `pandarag.db` (default `./data`). |
+| `PANDARAG_NCBI_EMAIL`, `NCBI_API_KEY` | PubMed etiquette and higher NCBI rate limits. |
 
-## Tabs
+---
 
-- **Ask** — the pipeline, with every stage toggleable and traced.
-- **Knowledge** — workspaces and documents; paste text, or upload a text file or PDF (up to 50 MB; scanned PDFs need OCR first), any domain.
-- **Graph** — entity co-occurrence graph mined from your chunks, draggable, clustered.
-- **Literature** — live PubMed / bioRxiv search, one click to import abstracts.
-- **Molecules** — Caco-2 permeability from the trained GCN + RDKit descriptors.
-- **Screening** — JAX Morgan fingerprints, pairwise Tanimoto, MaxMin diverse subset.
-- **Causal** — build a mechanistic chain, score it with TC-DrugRAG's formula.
-- **Repurposing** — rank diseases for a compound over Hetionet, with an honest model card.
-- **Labs** — which repo modules are live on this machine, and the retrieval stack.
+## Retrieval Quality (BEIR Benchmarks)
 
-## Pipeline
+`python3 backend/benchmark.py` scores every pipeline configuration on human-labelled BEIR test sets (needs `pandas`, `pyarrow`, `huggingface_hub`). nDCG@10:
 
-Contextual chunking → query decomposition + HyDE → hybrid BM25 + dense retrieval fused
-with reciprocal rank fusion → GraphRAG entity expansion → MMR rerank → corrective
-grading (CRAG) → grounded generation with citations → self-reflection metrics
-(faithfulness, answer relevance, context precision).
-
-Nothing is domain-specific: the entity extractor, chunker and graph are text-only, so a
-workspace of contracts, incident reports or lecture notes behaves the same as one of papers.
-
-## Retrieval quality
-
-`python3 backend/benchmark.py` scores every configuration on human-labelled BEIR test sets (needs
-`pandas`, `pyarrow` and `huggingface_hub`). nDCG@10:
-
-| | SciFact (tuned on) | NFCorpus (check) |
-| --- | --- | --- |
+| Configuration | SciFact (tuned on) | NFCorpus (holdout check) |
+| :--- | :---: | :---: |
 | BM25 only | 0.629 | 0.298 |
 | Old pipeline, LSA, all stages | 0.546 | 0.288 |
 | LSA, all stages | 0.612 | 0.297 |
 | **bge-small, all stages** | **0.714** | **0.356** |
 
-With LSA the full pipeline is still no better than BM25 alone; install the neural model for real gains.
-SciFact was used for tuning on its test queries, so treat that column as optimistic. Both sets are
-biomedical; HyDE and generated answers need an API key and are not measured.
+With LSA, the full pipeline is roughly tied with BM25 alone; install `sentence-transformers` for real neural gains. SciFact was used for tuning, so treat NFCorpus as the out-of-sample check. HyDE and generated answers require an LLM provider and are not measured in this offline run.
 
-## Capacity
+## Persistence & Capacity
 
-Timings below are for LSA. bge-small indexes about 85 chunks per second on a laptop CPU, so 12,000
-chunks take about 2.5 minutes after each restart; added documents encode only their own chunks.
+Workspaces, documents, and neural chunk embeddings are stored in `data/pandarag.db` (SQLite). Adding documents only embeds new chunks; restarting the server reloads cached neural vectors from SQLite immediately instead of re-encoding the corpus. Bulk imports (`POST /api/workspaces/{id}/import`) automatically deduplicate documents by SHA-256 content hash.
 
+---
 
-Measured on this machine (synthetic ~230-word abstracts, 2.5 chunks each, extractive mode):
+## Bundled Research Modules
 
-| Documents | Chunks | Reindex | Warm query | Memory |
-| --- | --- | --- | --- | --- |
-| 500 | 1,272 | 0.5 s | 4 ms | 330 MB |
-| 2,000 | 5,072 | 2.1 s | 9 ms | 513 MB |
-| 10,000 | 25,252 | 14.7 s | 35 ms | 1.5 GB |
+The modules PandaRAG wraps live inside `projects/`, including the trained ADMET checkpoint (`best_model.pt`). Two large artifacts are not committed to git — Hetionet (714 MB JSON) and the trained R-GCN checkpoint — which Repurposing needs.
 
-Real run: 100 PubMed abstracts fetched in 3.2 s, imported in 34 ms, first query 479 ms
-(it pays for the reindex), every query after that 5 ms.
+| Module | Repo | Capability |
+| :--- | :--- | :--- |
+| ADMET GNN | `ADMET-Prediction-System-…-with-RAG` | Caco-2 permeability (trained 3-layer GCN, epoch 69) + RDKit descriptors |
+| Screening | `OncoMolML` | JAX Morgan fingerprints + pairwise Tanimoto + MaxMin diversity |
+| Literature | `Literature-Intelligence` | Live PubMed + bioRxiv clients |
+| Causal KG | `TC-DrugRAG` | Causal/evidence schemas + 4-factor path scorer |
+| Oncology KB | `Oncology-Drug-Response-…_DL-RAG` | Curated oncology starter corpus |
+| Repurposing | `Drug-Repurposing-Intelligence-System` | Hetionet 47,031-node R-GCN link predictor (treats edges removed) |
 
-**Bulk import is the cheap path.** `POST /workspaces/{id}/import` adds every paper and the
-index rebuilds once, on the next query. Adding documents one at a time pays that rebuild each
-time, which is what hurts above a few thousand documents.
+### Honest Hetionet R-GCN Benchmark
 
-Comfortable today: a few thousand documents per workspace. Usable to ~10,000. The ceiling is
-the full refit (TF-IDF + SVD over every chunk) and the in-memory store — past that, split
-topics into separate workspaces, or make the index incremental and move the store to SQLite.
-
-## Repo wiring
-
-| Module | Repo | State on this machine |
-| --- | --- | --- |
-| ADMET GNN | `ADMET-Prediction-System-…-with-RAG` | live (trained checkpoint, epoch 69) |
-| Screening | `OncoMolML` | live (JAX fingerprints + Tanimoto + MaxMin) |
-| Literature | `Literature-Intelligence` | live (PubMed + bioRxiv clients) |
-| Causal KG | `TC-DrugRAG` | live (schemas + path scorer) |
-| Oncology KB | `Oncology-Drug-Response-…_DL-RAG` | live (seed corpus) |
-| Repurposing | `Drug-Repurposing-Intelligence-System` | live (Hetionet 47,031 nodes · trained checkpoint) |
-| Variant effects | `OncoMolML` | not bundled |
-
-Screening needs `jax` (`pip install "jax[cpu]"`). `pykeen` is in the repurposing repo's
-pinned requirements but is imported nowhere in its source.
-
-**Repurposing runs on the real R-GCN.** Hetionet is downloaded (714 MB JSON → 47,031 nodes,
-2.25 M edges) and `DrugRepurposingModel` now encodes the whole graph: `flatten_hetero` maps the
-heterogeneous graph onto one node index space with a relation id per edge (24 relations, plus
-their inverses = 48), and `RGCNEncoder` runs basis-decomposition message passing over the
-~4.5 M directed edges before the MLP decoder scores a compound-disease pair. Message passing
-costs the same at any batch size, so training is full-batch: one encode per epoch.
-
-Three upstream stubs had to go first — `RGCNEncoder.forward` dropped its convolution result on
-the floor and passed `edge_type=0` for every edge, `DrugRepurposingModel` was marked *"Simplified
-model for now - use embeddings"*, and `Trainer.evaluate` returned a hardcoded `auc: 0.0`.
-
-**Results.** `train_ranking.py` draws negatives per drug and uses a listwise loss. All
-`Compound-treats-Disease` edges are removed from the message-passing graph, in training and when
-serving. Filtered ranking of 137 diseases on 114 held-out pairs (one seed, one random pair split):
+All `Compound-treats-Disease` edges are stripped from the message-passing graph in both training and serving to prevent data leakage (filtered ranking over 137 diseases on 114 held-out pairs):
 
 | Scorer | Median rank | Hits@1 | Hits@10 | MRR |
-| --- | --- | --- | --- | --- |
-| **R-GCN, treats edges removed** (served) | **3.5** | **0.360** | **0.737** | **0.479** |
+| :--- | :---: | :---: | :---: | :---: |
+| **R-GCN, treats edges removed (served)** | **3.5** | **0.360** | **0.737** | **0.479** |
 | Embeddings only, same loss | 7 | 0.149 | 0.623 | 0.301 |
 | Popularity only (ignores the drug) | 13 | 0.096 | 0.447 | 0.220 |
 
-The R-GCN was chosen over embeddings on validation MRR (0.390 vs 0.258). Drugs can appear in both
-train and test, so this does not measure performance on compounds with no known indication.
+> **Leaked checkpoints excluded:** Earlier `ranking_model.pt` (MRR 0.674) and `rgcn_model.pt` (AUC 0.959) retained held-out `treats` edges in the message-passing graph and dropped to MRR 0.208 when stripped at inference. PandaRAG refuses to load those files.
 
-**Leaked results, do not cite.** `ranking_model.pt` (MRR 0.674) and `rgcn_model.pt` (AUC 0.959 / AP
-0.872) kept held-out treats edges in the message-passing graph. With val/test edges removed at
-inference, `ranking_model.pt` falls to MRR 0.208. The app no longer loads either file.
-
-To build it, inside `projects/Drug-Repurposing-Intelligence-System` (training takes about 15
-minutes on an Apple laptop CPU):
+To rebuild Hetionet & the R-GCN checkpoint (~15 min on Apple Silicon CPU):
 
 ```bash
+cd projects/Drug-Repurposing-Intelligence-System
 python3 scripts/download_data.py
-```
-
-```bash
 python3 scripts/train_ranking.py
 ```
 
-Add `--no-graph --output models/checkpoints/ranking_nograph.pt` for the embedding baseline. Each run writes `<output>.metrics.json` beside
-its checkpoint, which is what the model card reads.
+---
 
-The repos are loaded by file path, so nothing has to be installed as a package and the
-heavy optional imports in their `__init__.py` files stay out of the way.
+## Layout & Tests
 
-## Look
-
-Warm paper, hairline rules, serif display (Newsreader) over IBM Plex Sans/Mono, ochre accent,
-archival plate line-art at the margins. A sepia-dark variant lives behind the theme toggle.
-
-## Layout
-
-```
-backend/   app.py (API) · rag.py (engine) · pdf.py · labs.py (repo wrappers) · llm.py · test_rag.py
-projects/  the six research projects' modules the labs load
-frontend/  index.html · app.css · app.js       # no build step
-data/      store.json                          # workspaces, written atomically (gitignored)
+```text
+backend/        app.py (FastAPI) · rag.py (engine + SQLite) · llm.py (multi-provider)
+                pdf.py · labs.py (repo wrappers) · cli.py · test_rag.py · benchmark.py
+frontend/       index.html · app.css · app.js      # zero build step
+projects/       six bundled research modules
+data/           pandarag.db                        # SQLite workspaces + vector cache
+pyproject.toml  pip install -e . (`pandarag` CLI)
+Dockerfile      container + docker-compose.yml
 ```
 
-`python3 backend/test_rag.py` checks retrieval, generation, the graph, the empty-workspace
-path and document removal.
+Run the test suite (no pytest required):
+
+```bash
+python3 backend/test_rag.py
+```

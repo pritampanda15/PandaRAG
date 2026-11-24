@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pandarag"
+version = "0.2.0"
+description = "Glass-box retrieval-augmented generation engine & biomedical research workbench"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "pydantic>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.11",
+    "scikit-learn>=1.3",
+    "networkx>=3.0",
+    "requests>=2.31",
+    "biopython>=1.81",
+    "pypdf>=4.0",
+    "cryptography>=41.0",
+]
+
+[project.optional-dependencies]
+neural = ["sentence-transformers>=3.0"]
+anthropic = ["anthropic>=0.40"]
+bio = ["torch>=2.1", "torch-geometric>=2.4", "rdkit>=2023.9", "jax[cpu]>=0.4", "pandas>=2.0", "tqdm", "pyyaml"]
+benchmark = ["pandas>=2.0", "pyarrow>=14.0", "huggingface_hub>=0.20"]
+all = ["pandarag[neural,anthropic,bio,benchmark]"]
+
+[project.scripts]
+pandarag = "backend.cli:main"
+
+[tool.setuptools]
+packages = ["backend"]

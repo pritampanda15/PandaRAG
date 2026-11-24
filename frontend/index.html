@@ -17,12 +17,13 @@
       <div class="mark">P</div>
       <div>
         <h1>Panda<b>RAG</b></h1>
-        <small>Retrieval intelligence · any domain</small>
+        <small>Glass-box retrieval &amp; research workbench</small>
       </div>
     </div>
     <div class="spacer"></div>
     <select id="ws-select" style="width:auto;min-width:190px;padding:8px 12px;font-size:.84rem"></select>
     <span class="pill" id="llm-pill"><span class="dot off"></span>checking…</span>
+    <button class="ghost active" id="bio-btn" title="Show or hide biomedical research tabs">⬡ bio labs</button>
     <button class="ghost" id="theme-btn">◐ theme</button>
   </header>
 
@@ -31,12 +32,12 @@
     <button data-view="ask" aria-selected="true"><i>◎</i>Ask</button>
     <button data-view="knowledge"><i>▤</i>Knowledge</button>
     <button data-view="graph"><i>⌬</i>Graph</button>
-    <button data-view="literature"><i>❖</i>Literature</button>
-    <button data-view="molecules"><i>⬡</i>Molecules</button>
-    <button data-view="screening"><i>⧉</i>Screening</button>
-    <button data-view="causal"><i>⇝</i>Causal</button>
-    <button data-view="repurposing"><i>⟲</i>Repurposing</button>
-    <button data-view="labs"><i>▣</i>Labs</button>
+    <button class="bio-tab" data-view="literature"><i>❖</i>Literature</button>
+    <button class="bio-tab" data-view="molecules"><i>⬡</i>Molecules</button>
+    <button class="bio-tab" data-view="screening"><i>⧉</i>Screening</button>
+    <button class="bio-tab" data-view="causal"><i>⇝</i>Causal</button>
+    <button class="bio-tab" data-view="repurposing"><i>⟲</i>Repurposing</button>
+    <button class="bio-tab" data-view="labs"><i>▣</i>Labs</button>
   </nav>
 
   <main>
@@ -44,15 +45,22 @@
     <section class="view enter" id="view-ask">
       <div class="grid g2">
         <div class="card">
-          <h2 class="title">Ask your corpus</h2>
-          <p class="sub">Hybrid retrieval, graph expansion, corrective grading, grounded citations.</p>
+          <div class="row" style="justify-content:space-between;align-items:baseline">
+            <h2 class="title">Ask your corpus</h2>
+            <button class="mini" id="chat-clear" hidden>clear thread</button>
+          </div>
+          <p class="sub">Hybrid retrieval, graph expansion, corrective grading, grounded citations — with multi-turn follow-ups and A/B ablations.</p>
+          <div class="chat-turns" id="chat-turns"></div>
           <label class="field"><span>Question</span>
             <textarea id="q" rows="3" placeholder="e.g. What mechanisms drive resistance, and how do they differ between agents?"></textarea>
           </label>
           <div class="chips" id="q-chips" style="margin-bottom:14px"></div>
           <div class="row" style="justify-content:space-between">
             <div class="toggles" id="opts"></div>
-            <button class="primary" id="ask-btn">Retrieve &amp; answer</button>
+            <div class="row" style="gap:8px">
+              <button class="ghost" id="compare-btn" title="Run Baseline (Hybrid only) vs Current Pipeline side by side">A/B ablation</button>
+              <button class="primary" id="ask-btn">Retrieve &amp; answer</button>
+            </div>
           </div>
           <div id="answer-wrap" aria-live="polite" style="margin-top:22px"></div>
         </div>
@@ -78,17 +86,26 @@
       <div class="grid g2">
         <div class="card">
           <h2 class="title">Knowledge base</h2>
-          <p class="sub">Documents in this workspace, chunked with document-level context attached.</p>
+          <p class="sub">Documents in this workspace, persisted in SQLite with SHA-256 deduplication and cached neural vectors.</p>
           <div class="list" id="docs"></div>
         </div>
         <div class="grid" style="align-content:start">
           <div class="card">
-            <span class="eyebrow">Add a document</span>
-            <label class="field" style="margin-top:14px"><span>Title</span><input id="d-title" placeholder="Protocol note, paper, SOP…"></label>
-            <label class="field"><span>Text</span><textarea id="d-text" rows="7" placeholder="Paste any text — clinical, legal, engineering, financial. The engine is domain-agnostic."></textarea></label>
+            <span class="eyebrow">Add documents</span>
+            <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Drop PDFs or text files here, or click to select multiple files">
+              <b>Drop PDFs or text files here, or click to browse</b>
+              <small>Multiple files auto-ingest in one batch · 1 file loads below for review · PDF up to 50 MB</small>
+            </div>
+            <div class="batch-log" id="batch-log"></div>
+            <div class="row" style="margin-top:12px">
+              <input id="d-url" placeholder="Fetch URL, PDF link, or DOI (10.xxxx/…)" style="flex:1;min-width:170px;padding:9px 12px;font-size:.86rem">
+              <button class="ghost" id="d-fetch">fetch</button>
+            </div>
+            <label class="field" style="margin-top:12px"><span>Title</span><input id="d-title" placeholder="Protocol note, paper, SOP…"></label>
+            <label class="field"><span>Text</span><textarea id="d-text" rows="6" placeholder="Paste any text — clinical, legal, engineering, financial. The engine is domain-agnostic."></textarea></label>
             <div class="row"><button class="primary" id="d-add">Ingest</button>
-              <button class="ghost" id="d-file">⬆ from file</button>
-              <input type="file" id="d-input" accept=".txt,.md,.csv,.json,.pdf" hidden></div>
+              <button class="ghost" id="d-file">⬆ pick files</button>
+              <input type="file" id="d-input" accept=".txt,.md,.csv,.json,.pdf,.html,.htm" multiple hidden></div>
           </div>
           <div class="card">
             <span class="eyebrow">New workspace</span>
@@ -122,7 +139,7 @@
     <section class="view" id="view-literature" hidden>
       <div class="card">
         <h2 class="title">Literature intelligence</h2>
-        <p class="sub">Live PubMed and bioRxiv retrieval. Import abstracts straight into the active workspace.</p>
+        <p class="sub">Live PubMed and bioRxiv retrieval. Import deduplicated abstracts straight into the active workspace.</p>
         <div class="row">
           <input id="lit-q" placeholder="e.g. EGFR inhibitor resistance" style="flex:1;min-width:220px">
           <label class="toggle"><input type="checkbox" id="lit-pubmed" checked><i></i>PubMed</label>
@@ -133,7 +150,10 @@
         </div>
         <div class="row" style="margin-top:14px;justify-content:space-between">
           <span class="eyebrow" id="lit-count"></span>
-          <button class="mini" id="lit-import" hidden>⬇ Import all abstracts</button>
+          <div class="row" style="gap:8px">
+            <button class="mini" id="lit-import" hidden>⬇ Import all abstracts</button>
+            <button class="mini" id="lit-ask" hidden>Ask workspace →</button>
+          </div>
         </div>
         <div class="list" id="lit-results" style="margin-top:14px"></div>
       </div>
@@ -194,7 +214,7 @@
       <div class="grid g2">
         <div class="card">
           <h2 class="title">Causal path scoring</h2>
-          <p class="sub">Build a mechanistic chain; score it on evidence, depth, temporal order and source diversity.</p>
+          <p class="sub">Build or auto-draft a mechanistic chain from RAG evidence; score it on evidence, depth, temporal order and source diversity.</p>
           <div class="list" id="edges"></div>
           <div class="row" style="margin-top:14px">
             <button class="mini" id="edge-add">+ add hop</button>
@@ -214,7 +234,7 @@
       <div class="grid g2">
         <div class="card">
           <h2 class="title">Drug repurposing</h2>
-          <p class="sub">Link prediction over Hetionet — 47,031 nodes, trained on 528 of its 755 compound-treats-disease edges.</p>
+          <p class="sub">Link prediction over Hetionet — click Evidence on any candidate pair to verify it against literature &amp; RAG.</p>
           <div class="row">
             <input id="rep-drug" list="rep-drugs" placeholder="Compound — e.g. Imatinib" style="flex:1;min-width:190px">
             <datalist id="rep-drugs"></datalist>

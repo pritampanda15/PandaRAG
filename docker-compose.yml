@@ -1,0 +1,25 @@
+services:
+  pandarag:
+    build:
+      context: .
+      args:
+        INSTALL_NEURAL: "${INSTALL_NEURAL:-0}"
+    ports:
+      - "${PORT:-8787}:8787"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PANDARAG_PLUGINS=${PANDARAG_PLUGINS:-bio}
+      - PANDARAG_PROVIDER=${PANDARAG_PROVIDER:-}
+      - PANDARAG_MODEL=${PANDARAG_MODEL:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - PANDARAG_EMBED_MODEL=${PANDARAG_EMBED_MODEL:-}
+      - PANDARAG_NCBI_EMAIL=${PANDARAG_NCBI_EMAIL:-}
+      - NCBI_API_KEY=${NCBI_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
