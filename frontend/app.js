@@ -71,10 +71,18 @@ try { const b = localStorage.getItem("pandarag-bio"); if (b === "0") setBioLabs(
 async function loadWorkspaces(select) {
   const ws = await api("/workspaces");
   const sel = $("#ws-select");
-  sel.innerHTML = ws.map((w) => `<option value="${w.id}">${esc(w.name)} · ${w.docs} docs</option>`).join("");
+  sel.innerHTML = ws.length
+    ? ws.map((w) => `<option value="${w.id}">${esc(w.name)} · ${w.docs} docs</option>`).join("")
+    : '<option value="">No workspace yet</option>';
   state.ws = select && ws.some((w) => w.id === select) ? select : ws[0]?.id || null;
   sel.value = state.ws || "";
   return ws;
+}
+async function ensureWorkspace(name = "Research", domain = "General") {
+  if (state.ws) return state.ws;
+  const w = await api("/workspaces", { body: { name: name.trim() || "Research", domain } });
+  await loadWorkspaces(w.id);
+  return w.id;
 }
 $("#ws-select").onchange = (e) => { state.ws = e.target.value; state.history = []; renderChatHistory(); refreshActive(); };
 function refreshActive() {
@@ -306,10 +314,11 @@ $("#d-add").onclick = async () => {
   const title = $("#d-title").value.trim() || "Untitled", text = $("#d-text").value.trim();
   if (!text) return toast("Paste some text first", true);
   try {
-    const r = await api(`/workspaces/${state.ws}/docs`, { body: { title, text } });
+    const wid = await ensureWorkspace(title.slice(0, 32), "General");
+    const r = await api(`/workspaces/${wid}/docs`, { body: { title, text } });
     $("#d-title").value = $("#d-text").value = "";
     toast(r.duplicate ? "Already in workspace (skipped duplicate)" : "Ingested & indexed");
-    onShow.knowledge(); loadWorkspaces(state.ws);
+    onShow.knowledge(); loadWorkspaces(wid);
   } catch (e) { toast(e.message, true); }
 };
 $("#d-fetch").onclick = async () => {
@@ -340,7 +349,7 @@ async function readSingleFile(f) {
 async function handleFiles(fileList) {
   const files = [...fileList];
   if (!files.length) return;
-  if (!state.ws) return toast("Create a workspace first", true);
+  if (!state.ws) await ensureWorkspace("Research", "General");
 
   // Single file: load into the editor for quick review (familiar workflow).
   if (files.length === 1) {
@@ -658,11 +667,28 @@ $("#lit-btn").onclick = async () => {
 };
 $("#lit-q").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#lit-btn").click(); });
 $("#lit-import").onclick = async () => {
-  const res = await api(`/workspaces/${state.ws}/import`, { body: { papers: state.lit } });
-  const skip = res.skipped ? ` (${res.skipped} duplicate${res.skipped === 1 ? "" : "s"} skipped)` : "";
-  toast(`Imported ${res.imported} abstracts${skip}`);
-  $("#lit-ask").hidden = false;
-  loadWorkspaces(state.ws);
+  if (!state.lit.length) return toast("Run a literature search first", true);
+  const btn = $("#lit-import"), label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Importing…";
+  try {
+    const q = $("#lit-q").value.trim();
+    const created = !state.ws;
+    const wid = await ensureWorkspace(q ? q.slice(0, 36) : "Literature", "Biomedical");
+    const res = await api(`/workspaces/${wid}/import`, { body: { papers: state.lit } });
+    const skip = res.skipped ? ` (${res.skipped} duplicate${res.skipped === 1 ? "" : "s"} skipped)` : "";
+    const wsNote = created ? ` into new "${q ? q.slice(0, 36) : "Literature"}" workspace` : "";
+    if (!res.imported && !res.skipped) {
+      toast("No abstracts available to import in these results", true);
+    } else {
+      toast(`Imported ${res.imported} abstract${res.imported === 1 ? "" : "s"}${wsNote}${skip}`);
+      $("#lit-ask").hidden = false;
+    }
+    await loadWorkspaces(wid);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
 };
 $("#lit-ask").onclick = () => {
   const q = $("#lit-q").value.trim();
@@ -772,11 +798,11 @@ $("#rep-btn").onclick = async () => {
   } finally { btn.disabled = false; btn.textContent = "Rank"; }
 };
 $("#rep-import").onclick = async () => {
-  if (!state.ws) return toast("No workspace selected", true);
   try {
-    const r = await api(`/workspaces/${state.ws}/seed/repurposing`, { body: {} });
+    const wid = await ensureWorkspace("Drug Repurposing", "Biomedical");
+    const r = await api(`/workspaces/${wid}/seed/repurposing`, { body: {} });
     const skip = r.skipped ? ` (${r.skipped} already present)` : "";
-    toast(`Imported ${r.imported} mechanism notes${skip}`); loadWorkspaces(state.ws);
+    toast(`Imported ${r.imported} mechanism notes${skip}`); loadWorkspaces(wid);
   } catch (e) { toast(e.message, true); }
 };
 
